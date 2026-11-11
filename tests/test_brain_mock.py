@@ -69,6 +69,28 @@ def main():
         ok &= check("decide organize -> organize / today",
                     a == {"action": "organize", "query": "today"}, str(a))
 
+        a = brain.decide("organize yesterday's Downloads")
+        ok &= check("decide organize yesterday -> organize / yesterday",
+                    a == {"action": "organize", "query": "yesterday"},
+                    str(a))
+
+        a = brain.decide("organize the last 3 days")
+        ok &= check("decide organize last 3 days -> organize / last 3 days",
+                    a == {"action": "organize", "query": "last 3 days"},
+                    str(a))
+
+        a = brain.decide("organize my files in Downloads")
+        ok &= check("decide organize with no range -> organize / '' (ask)",
+                    a == {"action": "organize", "query": ""}, str(a))
+
+        a = brain.decide("find duplicates")
+        ok &= check("decide find duplicates -> duplicates",
+                    a == {"action": "duplicates", "query": ""}, str(a))
+
+        a = brain.decide("delete the extra copies")
+        ok &= check("decide delete extra copies -> duplicates / delete",
+                    a == {"action": "duplicates", "query": "delete"}, str(a))
+
         a = brain.decide("open notepad")
         ok &= check("decide open notepad -> open_app / notepad",
                     a == {"action": "open_app", "query": "notepad"}, str(a))
@@ -92,6 +114,21 @@ def main():
     a = dead.decide("organize today's Downloads")
     ok &= check("offline fallback: organize -> organize",
                 a == {"action": "organize", "query": "today"}, str(a))
+    a = dead.decide("organize my files in Downloads")
+    ok &= check("offline fallback: organize with no range -> ask",
+                a == {"action": "organize", "query": ""}, str(a))
+    a = dead.decide("organize yesterday's Downloads")
+    ok &= check("offline fallback: organize yesterday",
+                a == {"action": "organize", "query": "yesterday"}, str(a))
+    a = dead.decide("organize the last 5 days")
+    ok &= check("offline fallback: organize last 5 days",
+                a == {"action": "organize", "query": "last 5 days"}, str(a))
+    a = dead.decide("find duplicates")
+    ok &= check("offline fallback: find duplicates -> duplicates",
+                a == {"action": "duplicates", "query": ""}, str(a))
+    a = dead.decide("delete the extra copies")
+    ok &= check("offline fallback: delete extra copies -> duplicates",
+                a == {"action": "duplicates", "query": "delete"}, str(a))
     a = dead.decide("open something about travel and tourism")
     ok &= check("offline fallback: open about -> open",
                 a.get("action") == "open" and "travel" in a.get("query", ""),
@@ -115,6 +152,14 @@ def main():
         'Sure! {"action": "search", "query": "test"} done.')
     ok &= check("_parse_action_json pulls JSON out of chatty text",
                 parsed == {"action": "search", "query": "test"}, str(parsed))
+    ok &= check("_parse_action_json accepts duplicates with no query",
+                Brain._parse_action_json(
+                    '{"action": "duplicates", "query": ""}')
+                == {"action": "duplicates", "query": ""})
+    ok &= check("_parse_action_json accepts organize with empty query",
+                Brain._parse_action_json(
+                    '{"action": "organize", "query": ""}')
+                == {"action": "organize", "query": ""})
 
     print("\n" + ("ALL BRAIN TESTS PASSED" if ok else "BRAIN TESTS FAILED"))
     return 0 if ok else 1

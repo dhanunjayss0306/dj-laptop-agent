@@ -60,8 +60,18 @@ python -m pip install -r requirements.txt
 Wait until the prompt comes back (the last line is your prompt
 again). If you see red errors, see "If something goes wrong" below.
 
-**Step 4.** Start LM Studio and load your models. Open LM Studio
-from the Start menu.
+**Step 4.** Start DJ. Go back to the black Command Prompt window
+and type this and press Enter:
+
+```
+python dj.py
+```
+
+The DJ window opens. DJ tries to start LM Studio itself with the
+`lms` tool: it starts the local server and loads your chat model
+and the embedding model. If it cannot — for example if `lms` is not
+on your computer — DJ says so plainly in the window. Then start
+LM Studio by hand instead:
 
 1. Load your chat model: click the model name at the top of the
    LM Studio window, pick your model, and wait until it says
@@ -77,21 +87,12 @@ from the Start menu.
    then click **Start Server**. It should say the server is
    running on port 1234.
 
-Leave LM Studio open while you use DJ. DJ cannot start LM Studio
-by itself.
-
-**Step 5.** Start DJ. Go back to the black Command Prompt window
-and type this and press Enter:
-
-```
-python dj.py
-```
-
-The DJ window opens.
+Leave LM Studio open while you use DJ.
 
 That is all. From now on, to open DJ again you only repeat
-Steps 1, 2, 4 (make sure LM Studio is open, your model is loaded,
-and the server is started) and 5.
+Steps 1, 2 and 4. If DJ says LM Studio is not running, wait a
+minute (it may still be starting it), or start LM Studio by hand
+as above.
 
 ---
 
@@ -124,7 +125,8 @@ Type any of these in the DJ window and press Enter:
 find my Virun pitch
 open something about travel and tourism
 summarize my Virun pitch
-organize today's Downloads
+organize yesterday's Downloads
+find duplicates
 open notepad
 ```
 
@@ -134,12 +136,22 @@ open notepad
 - **summarize ...** — reads the file and gives a short summary.
 - **organize today's Downloads** — shows you a list of what it will
   move, and moves nothing until you click **Yes, move these**.
-  It follows your own organizer rules: keyword folders first
-  (Virun, SAPSS, SasyaSakhi, Persona, GlobalTap, Quantum,
+  You can say which days: "organize yesterday's Downloads",
+  "organize the last 3 days", "organize everything in Downloads".
+  If you give no date, DJ asks you: Today, Yesterday, Last 7 days,
+  or All files. It follows your own organizer rules: keyword folders
+  first (Virun, SAPSS, SasyaSakhi, Persona, GlobalTap, Quantum,
   HackerRank, VRGym, College), then file-type folders, anything
   left goes to `_Review`. Every move is written to
   `_Organizer_Log.csv` in Downloads. Nothing is deleted, nothing
   is overwritten.
+- **find duplicates** — finds extra copies of the same file in your
+  folders (same contents, even if the name is different). The first
+  copy in each group is always kept. Tick the copies you want rid
+  of and click **Delete selected copies** — DJ shows you exactly
+  which files will go, and only deletes after you say Yes. Deleted
+  files go to the Recycle Bin, not gone forever, and every deletion
+  is written to `_Organizer_Log.csv` in Downloads.
 - **open notepad** — opens an installed app by name.
 
 Other buttons in the window:
@@ -155,11 +167,11 @@ Other buttons in the window:
 - No voice, no wake word. Those come later.
 - No reminders, calendar or journal. Those are Persona features,
   kept aside for later.
-- DJ never sends anything anywhere and never deletes anything.
-- If LM Studio is not running, DJ says so plainly, and finding
-  files still works (by keyword) without the AI. DJ cannot start
-  LM Studio by itself — you start it once, and leave it open
-  while you use DJ.
+- DJ never sends anything anywhere. It deletes only extra copies you
+  pick yourself, after you confirm, and only to the Recycle Bin.
+- If LM Studio is not running, DJ tries to start it itself with
+  the `lms` tool. If that does not work, DJ says so plainly, and
+  finding files still works (by keyword) without the AI.
 
 ---
 
@@ -175,9 +187,14 @@ DJ still works without it — it falls back to keyword search
 and it will be fixed. Everything else still installs.
 
 **DJ says "LM Studio is not running".**
-Open LM Studio, load your chat model, click **Developer** on the
-left, then click **Start Server**. Wait 10 seconds, then click
-**Rebuild index** in DJ.
+DJ tries to start it itself first — give it a minute, the model
+takes a while to load. If it still says that, open LM Studio, load
+your chat model, click **Developer** on the left, then click
+**Start Server**. Wait 10 seconds, then click **Rebuild index** in DJ.
+
+**DJ says it cannot delete duplicates (send2trash is not installed).**
+Run `python -m pip install send2trash` in the black window, then
+try again. DJ never deletes without that safety net.
 
 **DJ says the embedding model is not loaded, or search is keyword only.**
 In LM Studio, load `nomic-embed-text` as well as your chat model:
@@ -199,8 +216,10 @@ That is normal. It only happens once. Later rebuilds are faster.
 | `dj.py` | The file you run: `python dj.py` |
 | `dj_gui.py` | The chat window |
 | `dj_brain.py` | Talking to LM Studio, deciding what to do |
+| `dj_lmstudio.py` | Starting LM Studio itself with the `lms` tool |
+| `dj_theme.py` | The look: Astryx neutral theme colours and type |
 | `dj_indexer.py` | The private search engine (vector + keyword) |
-| `dj_actions.py` | Find, open, summarize, organize, open app |
+| `dj_actions.py` | Find, open, summarize, organize, duplicates, open app |
 | `dj_config.py` | Settings: your folders and models |
 | `requirements.txt` | The free packages to install |
 | `dj_config.json` | Created on first run — your saved folders |

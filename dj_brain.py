@@ -15,9 +15,10 @@ The brain answers with one small JSON object:
   {"action": "search" | "open" | "summarize" | "organize" | "list" | "open_app",
    "query": "..."}
 
-DJ cannot start LM Studio itself. If the LM Studio server is not
-running, or no model is loaded, DJ says so plainly and falls back to
-simple keyword rules, so finding files still works without any AI.
+DJ cannot start LM Studio itself — that is dj_lmstudio's job (it
+tries the `lms` command-line tool first). If the LM Studio server is
+not running, or no model is loaded, DJ says so plainly and falls back
+to simple keyword rules, so finding files still works without any AI.
 """
 
 import json
@@ -31,7 +32,8 @@ in plain English. Reply with ONLY one JSON object, no other text.
 {"action": "search", "query": "..."}       - find files by name or topic
 {"action": "open", "query": "..."}         - open a file the user names, or open files about a topic
 {"action": "summarize", "query": "..."}    - summarize a file the user names
-{"action": "organize", "query": "today"}   - organize today's Downloads
+{"action": "organize", "query": "today"}   - organize Downloads for a date range
+{"action": "duplicates", "query": ""}      - find extra copies of the same file
 {"action": "list", "query": "..."}         - list files, e.g. recent files
 {"action": "open_app", "query": "notepad"} - open an installed app by name
 
@@ -40,6 +42,12 @@ Rules:
 - "open something about travel and tourism" -> {"action": "open", "query": "travel and tourism"}
 - "summarize this file" or "summarize my Virun pitch" -> {"action": "summarize", "query": "Virun pitch"}
 - "organize today's Downloads" -> {"action": "organize", "query": "today"}
+- "organize yesterday's Downloads" -> {"action": "organize", "query": "yesterday"}
+- "organize the last 3 days" -> {"action": "organize", "query": "last 3 days"}
+- "organize everything in Downloads" -> {"action": "organize", "query": "all"}
+- "organize my files in Downloads" (no date given) -> {"action": "organize", "query": ""}
+- "find duplicates" or "find extra copies" -> {"action": "duplicates", "query": ""}
+- "delete the extra copies" -> {"action": "duplicates", "query": "delete"}
 - "open notepad" or "open chrome" -> {"action": "open_app", "query": "notepad"}
 - If the user just names a topic, use "search" with that topic as the query.
 - The query is the file name, topic, or app name — never the whole sentence.
@@ -189,8 +197,12 @@ class Brain:
             return None
         action = str(data.get("action", "")).strip().lower()
         query = str(data.get("query", "")).strip()
-        if action in ("search", "open", "summarize", "organize", "list",
+        if action in ("search", "open", "summarize", "list",
                       "open_app") and query:
+            return {"action": action, "query": query}
+        # "organize" with an empty query means "ask which date range".
+        # "duplicates" needs no query at all.
+        if action in ("organize", "duplicates"):
             return {"action": action, "query": query}
         return None
 
@@ -200,8 +212,13 @@ class Brain:
         """Decide without any model, from the words themselves."""
         low = text.lower().strip()
 
+        if "duplicat" in low or "extra cop" in low or "same file" in low:
+            return {"action": "duplicates",
+                    "query": "delete" if "delet" in low else ""}
+
         if "organiz" in low:
-            return {"action": "organize", "query": "today"}
+            spec = _organize_range_from_words(low)
+            return {"action": "organize", "query": spec or ""}
 
         if "summar" in low:
             query = _after_words(low, ["summarize", "summarise", "summary of",
@@ -249,6 +266,25 @@ class Brain:
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         return ("(LM Studio is not answering, so here are the first lines "
                 "of the file instead:)\n" + "\n".join(lines[:8]))
+
+
+def _organize_range_from_words(low: str) -> str:
+    """The date range in the user's words, as a short string DJ can
+    show and plan_organize can read back ("today", "yesterday",
+    "last 3 days", "all"), or "" if no range was mentioned."""
+    if re.search(r"\b(all|everything|every file)\b", low):
+        return "all"
+    if "yesterday" in low:
+        return "yesterday"
+    m = re.search(r"(?:last|past)\s+(\d+)\s+days?", low)
+    if m:
+        n = max(1, int(m.group(1)))
+        return f"last {n} day{'s' if n != 1 else ''}"
+    if "this week" in low or "last week" in low:
+        return "last 7 days"
+    if "today" in low:
+        return "today"
+    return ""
 
 
 def _after_words(text: str, words: list) -> str:

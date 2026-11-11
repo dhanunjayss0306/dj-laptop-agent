@@ -50,8 +50,21 @@ def _canned_action(user_text: str) -> dict:
         return {"action": "search", "query": "Virun pitch"}
     if "travel and tourism" in low:
         return {"action": "open", "query": "travel and tourism"}
+    if "duplicat" in low or "extra cop" in low:
+        return {"action": "duplicates",
+                "query": "delete" if "delet" in low else ""}
     if "organize" in low:
-        return {"action": "organize", "query": "today"}
+        if "yesterday" in low:
+            return {"action": "organize", "query": "yesterday"}
+        m = re.search(r"last\s+(\d+)\s+days?", low)
+        if m:
+            return {"action": "organize",
+                    "query": f"last {m.group(1)} days"}
+        if "all" in low or "everything" in low:
+            return {"action": "organize", "query": "all"}
+        if "today" in low:
+            return {"action": "organize", "query": "today"}
+        return {"action": "organize", "query": ""}
     if "summar" in low:
         return {"action": "summarize", "query": "Virun pitch"}
     if "notepad" in low:

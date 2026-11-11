@@ -24,7 +24,8 @@ def main():
 
     # 1. Every module compiles.
     for name in ["dj.py", "dj_config.py", "dj_indexer.py", "dj_brain.py",
-                 "dj_actions.py", "dj_gui.py"]:
+                 "dj_lmstudio.py", "dj_theme.py", "dj_actions.py",
+                 "dj_gui.py"]:
         try:
             py_compile.compile(str(ROOT / name), doraise=True)
             print(f"PASS  compile {name}")
@@ -34,7 +35,8 @@ def main():
             traceback.print_exc()
 
     # 2. Every module imports (the GUI import does NOT open a window).
-    for mod in ["dj_config", "dj_indexer", "dj_brain", "dj_actions", "dj_gui"]:
+    for mod in ["dj_config", "dj_indexer", "dj_brain", "dj_lmstudio",
+                "dj_theme", "dj_actions", "dj_gui"]:
         try:
             __import__(mod)
             print(f"PASS  import {mod}")
@@ -43,11 +45,14 @@ def main():
             print(f"FAIL  import {mod}")
             traceback.print_exc()
 
-    # 3. The three test suites.
+    # 3. The test suites.
     import test_indexer
     import test_brain_mock
     import test_organize
-    for suite in [test_indexer, test_brain_mock, test_organize]:
+    import test_lmstudio
+    import test_duplicates
+    for suite in [test_indexer, test_brain_mock, test_organize,
+                  test_lmstudio, test_duplicates]:
         try:
             rc = suite.main()
             print(f"{'PASS' if rc == 0 else 'FAIL'}  suite {suite.__name__}")

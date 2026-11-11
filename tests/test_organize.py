@@ -100,6 +100,58 @@ def main():
     ok &= check("second plan is empty (nothing left from today)",
                 plan2 == [], str([p["name"] for p in plan2]))
 
+    # ---- Date ranges (new behaviour) ------------------------------------
+    tmp2 = Path(tempfile.mkdtemp(prefix="dj_dl_range_"))
+    dl2 = tmp2 / "Downloads"
+    dl2.mkdir()
+    three_days = now - 3 * 86400
+    ten_days = now - 10 * 86400
+    touch(dl2 / "today file.txt", mtime=now)
+    touch(dl2 / "yesterday file.txt", mtime=yesterday)
+    touch(dl2 / "three days file.txt", mtime=three_days)
+    touch(dl2 / "old file.txt", mtime=ten_days)
+
+    plan_today = actions.plan_organize(dl2, ("today", None))
+    ok &= check("range today: only today's file",
+                [p["name"] for p in plan_today] == ["today file.txt"],
+                str([p["name"] for p in plan_today]))
+    plan_y = actions.plan_organize(dl2, ("yesterday", None))
+    ok &= check("range yesterday: only yesterday's file",
+                [p["name"] for p in plan_y] == ["yesterday file.txt"],
+                str([p["name"] for p in plan_y]))
+    plan_3 = actions.plan_organize(dl2, ("last_days", 3))
+    ok &= check("range last 3 days: today + yesterday + 3 days ago",
+                sorted(p["name"] for p in plan_3) ==
+                ["three days file.txt", "today file.txt",
+                 "yesterday file.txt"],
+                str(sorted(p["name"] for p in plan_3)))
+    plan_all = actions.plan_organize(dl2, ("all", None))
+    ok &= check("range all: every file",
+                len(plan_all) == 4, str([p["name"] for p in plan_all]))
+    plan_default = actions.plan_organize(dl2)
+    ok &= check("no range given still means today",
+                [p["name"] for p in plan_default] == ["today file.txt"])
+
+    ok &= check("parse: 'last 3 days'",
+                actions.parse_organize_range(
+                    "organize the last 3 days") == ("last_days", 3))
+    ok &= check("parse: 'yesterday'",
+                actions.parse_organize_range(
+                    "organize yesterday's Downloads") == ("yesterday", None))
+    ok &= check("parse: 'everything'",
+                actions.parse_organize_range(
+                    "organize everything in Downloads") == ("all", None))
+    ok &= check("parse: 'this week' -> last 7 days",
+                actions.parse_organize_range(
+                    "organize this week") == ("last_days", 7))
+    ok &= check("parse: no range mentioned -> None",
+                actions.parse_organize_range(
+                    "organize my files in Downloads") is None)
+    ok &= check("range labels read plainly",
+                actions.range_label(("last_days", 3)) == "the last 3 days"
+                and actions.range_label(("all", None)) == "all files"
+                and actions.range_label(("yesterday", None)) == "yesterday")
+
     print("\n" + ("ALL ORGANIZE TESTS PASSED" if ok else "ORGANIZE TESTS FAILED"))
     return 0 if ok else 1
 
