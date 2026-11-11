@@ -1,0 +1,11 @@
+# DJ requirements — everything here is free and runs on the laptop.
+# Install with:  python -m pip install -r requirements.txt
+#
+# Tkinter (the chat window) is built into Python on Windows — no install needed.
+# LM Studio and the models (your chat model and nomic-embed-text-v1.5)
+# are separate and free from lmstudio.ai — they are NOT in this file.
+
+requests>=2.31
+chromadb>=0.5
+pypdf>=4.0
+python-docx>=1.1
