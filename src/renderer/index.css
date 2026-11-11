@@ -1,0 +1,320 @@
+/* DJ v3 — renderer styles. Flat, plain, honest.
+   White background, ink text, blue accents. No gradients, no glow,
+   no decorative animation. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #1d1d1f;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.dj-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #ffffff;
+  color: #1d1d1f;
+}
+
+/* Header */
+
+.dj-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+.dj-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dj-subtitle {
+  font-size: 13px;
+  color: #6e6e73;
+}
+
+.dj-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Status bar */
+
+.dj-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e5e5e5;
+  font-size: 13px;
+  color: #3a3a3c;
+  flex-shrink: 0;
+}
+
+.dj-statusbar strong {
+  color: #1d1d1f;
+  font-weight: 600;
+}
+
+.dj-stale {
+  padding: 8px 16px;
+  border-bottom: 1px solid #e5e5e5;
+  background: #fafafa;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.dj-progress {
+  padding: 8px 16px;
+  border-bottom: 1px solid #e5e5e5;
+  flex-shrink: 0;
+}
+
+.dj-progress-message {
+  font-size: 13px;
+  color: #3a3a3c;
+  margin: 0 0 6px;
+}
+
+/* Chat */
+
+.dj-chat {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dj-msg {
+  max-width: 640px;
+  padding: 10px 12px;
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  border-radius: 4px;
+}
+
+.dj-msg-user {
+  align-self: flex-end;
+  background: #f5f5f7;
+}
+
+.dj-msg-dj {
+  align-self: flex-start;
+}
+
+.dj-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dj-text-muted {
+  color: #6e6e73;
+}
+
+.dj-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dj-result-card {
+  padding: 10px 12px;
+}
+
+.dj-result-name {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.dj-result-folder {
+  font-size: 12px;
+  color: #6e6e73;
+  word-break: break-all;
+}
+
+.dj-result-snippet {
+  font-size: 13px;
+  margin: 6px 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dj-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.dj-move {
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+  word-break: break-all;
+}
+
+.dj-move:last-child {
+  border-bottom: none;
+}
+
+.dj-summary-file {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 4px;
+  word-break: break-all;
+}
+
+.dj-summary-note {
+  font-size: 12px;
+  color: #6e6e73;
+  margin: 8px 0 0;
+}
+
+/* Duplicates */
+
+.dj-dup-card {
+  padding: 10px 12px;
+}
+
+.dj-dup-header {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.dj-dup-file {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dj-dup-file:last-child {
+  border-bottom: none;
+}
+
+.dj-dup-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dj-dup-file-name {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.dj-dup-file-folder {
+  font-size: 12px;
+  color: #6e6e73;
+  word-break: break-all;
+}
+
+.dj-keep {
+  font-size: 12px;
+  border: 1px solid #e5e5e5;
+  background: #f5f5f7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.dj-dup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+/* Composer */
+
+.dj-composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e5e5e5;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.dj-composer-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dj-composer-input > * {
+  width: 100%;
+}
+
+.dj-working {
+  align-self: flex-start;
+  font-size: 13px;
+  color: #6e6e73;
+  padding: 10px 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+}
+
+/* Dialogs */
+
+.dj-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.dj-dialog-note {
+  font-size: 13px;
+  color: #3a3a3c;
+  margin: 0;
+}
+
+.dj-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.dj-folder-row {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 4px 0;
+}
+
+.dj-folder-row:last-child {
+  border-bottom: none;
+}
