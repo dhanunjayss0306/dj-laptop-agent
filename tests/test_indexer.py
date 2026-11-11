@@ -182,6 +182,102 @@ def main():
     ok &= check("no index at all is not stale",
                 fresh.index_is_stale() is False)
 
+    # ---- 4. Scan pruning: junk folders are never entered, and the
+    # scan reports progress while it walks --------------------------
+    import os as _os
+    import io as _io
+    from contextlib import redirect_stdout as _redirect_stdout
+
+    tree = tmp / "tree"
+    normal = tree / "projects" / "myapp"
+    normal.mkdir(parents=True)
+    # 250 normal files, so a scan-progress callback fires mid-walk
+    # (every 200 files found).
+    for i in range(250):
+        (normal / f"note_{i:03d}.txt").write_text(
+            "travel and tourism notes\n" * 5, encoding="utf-8")
+    # Junk folders full of files the walk must never enter.
+    for j in range(50):
+        pkg = tree / "node_modules" / f"pkg{j:02d}"
+        pkg.mkdir(parents=True)
+        for k in range(20):
+            (pkg / f"lib_{k:02d}.js").write_text("var x = 1;\n",
+                                                encoding="utf-8")
+    venv_lib = tree / ".venv" / "lib"
+    venv_lib.mkdir(parents=True)
+    for i in range(300):
+        (venv_lib / f"mod_{i:03d}.py").write_text("x = 1\n",
+                                                 encoding="utf-8")
+    git_obj = tree / ".git" / "objects"
+    git_obj.mkdir(parents=True)
+    for i in range(100):
+        (git_obj / f"obj_{i:03d}").write_text("blob\n", encoding="utf-8")
+    hidden = tree / ".hidden"
+    hidden.mkdir()
+    for i in range(20):
+        (hidden / f"secret_{i:02d}.txt").write_text("hidden\n",
+                                                   encoding="utf-8")
+
+    events = []
+
+    def record(stage, done, total, message):
+        events.append((stage, done, total, message))
+
+    idx3 = Indexer(tmp / "data_scan", "http://127.0.0.1:9/v1",
+                   "nomic-embed-text-v1.5", progress_cb=record)
+    # Count the folders the walk actually opens: with pruning it
+    # should only ever list tree, projects and myapp.
+    real_scandir = _os.scandir
+    opened = []
+
+    def counting_scandir(path, *a, **kw):
+        opened.append(str(path))
+        return real_scandir(path, *a, **kw)
+
+    out = _io.StringIO()
+    _os.scandir = counting_scandir
+    try:
+        with _redirect_stdout(out):
+            found = idx3._iter_files([tree])
+    finally:
+        _os.scandir = real_scandir
+    names = [str(p) for p in found]
+    ok &= check("walk finds only the normal files",
+                len(found) == 250, f"got {len(found)}")
+    ok &= check("walk never enters node_modules",
+                not any("node_modules" in p for p in names))
+    ok &= check("walk never enters .venv",
+                not any(".venv" in p for p in names))
+    ok &= check("walk never enters .git",
+                not any(".git" in p for p in names))
+    ok &= check("walk never enters hidden folders",
+                not any(".hidden" in p for p in names))
+    ok &= check("walk opens only the folders it needs",
+                len(opened) <= 5, f"opened {len(opened)}: {opened}")
+    ok &= check("walk never opens a junk folder",
+                not any(any(j in p for j in ("node_modules", ".venv",
+                                             ".git", ".hidden"))
+                        for p in opened), str(opened))
+    scan_events = [e for e in events if e[0] == "scan"]
+    ok &= check("scan progress fires during the walk",
+                len(scan_events) >= 2, f"got {len(scan_events)}")
+    ok &= check("scan progress reports files found (done > 0)",
+                any(e[1] > 0 for e in scan_events),
+                str([e[1] for e in scan_events]))
+    ok &= check("scan progress names the folder being scanned",
+                any("tree" in e[3] for e in scan_events),
+                str([e[3] for e in scan_events]))
+    console = out.getvalue()
+    ok &= check("console shows the folder being scanned",
+                "DJ: scanning tree" in console)
+    ok &= check("console shows the scan total",
+                "DJ: scan done: 250 readable files in total" in console)
+
+    # The full build over the same tree only indexes the normal files.
+    counts = idx3.build([tree])
+    ok &= check("build over the pruned tree reads 250 files",
+                counts["files"] == 250, f"got {counts['files']}")
+
     print("\n" + ("ALL INDEXER TESTS PASSED" if ok else "INDEXER TESTS FAILED"))
     return 0 if ok else 1
 

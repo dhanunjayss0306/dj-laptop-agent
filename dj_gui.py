@@ -182,10 +182,19 @@ class DJApp:
             pass
         # Paint any index-build progress the worker thread reported.
         if self._progress_state is not None and self._rebuild_win is not None:
-            done, total, message = self._progress_state
+            stage, done, total, message = self._progress_state
             try:
                 self._rebuild_label.configure(text=message)
-                self._rebuild_bar.configure(maximum=max(total, 1), value=done)
+                if stage == "scan":
+                    # The total is unknown while scanning: keep the bar
+                    # moving instead of sitting at zero.
+                    self._rebuild_bar.configure(mode="indeterminate")
+                    self._rebuild_bar.start(50)
+                else:
+                    self._rebuild_bar.stop()
+                    self._rebuild_bar.configure(
+                        mode="determinate",
+                        maximum=max(total, 1), value=done)
             except Exception:
                 pass
         self.root.after(200, self._check_jobs)
@@ -385,7 +394,7 @@ class DJApp:
         def progress(stage, done, total, message):
             # Called from the worker thread: only store plain data.
             # The main thread paints it in _check_jobs.
-            self._progress_state = (done, total, message)
+            self._progress_state = (stage, done, total, message)
 
         def job():
             idx = Indexer(self.data_dir, self.config["lmstudio_url"],

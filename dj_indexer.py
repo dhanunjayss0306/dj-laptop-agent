@@ -22,6 +22,7 @@ are files on this machine only.
 
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -273,33 +274,80 @@ class Indexer:
 
     # -- walking ---------------------------------------------------------
     def _iter_files(self, folders: list) -> list:
-        """All readable files under the given folders, skipping junk."""
+        """All readable files under the given folders, skipping junk.
+
+        The walk prunes junk folders (node_modules, .venv, .git, hidden
+        folders, ...) while it walks — it never descends into them at
+        all. The old code listed every file first (rglob) and filtered
+        afterwards, so a project folder with tens of thousands of files
+        inside node_modules made the first build look frozen. Progress
+        is reported as the walk goes (every 200 files found, plus once
+        per folder), and the same lines are printed to the console so
+        the cmd window shows what DJ is doing. One bad folder
+        (permission error, OneDrive hiccup, broken link) is skipped
+        with a note instead of stalling the whole build, and directory
+        symlinks/junctions are never followed.
+        """
         found = []
         seen = set()
         for folder in folders:
             folder = Path(folder)
             if not folder.is_dir():
+                print(f"DJ: skipping {folder} (not a folder)",
+                      flush=True)
                 continue
-            for path in folder.rglob("*"):
-                try:
-                    if path.is_dir():
-                        continue
-                    if path.name.startswith("."):
-                        continue
-                    if any(part.lower() in SKIP_DIRS for part in path.parts):
-                        continue
-                    if path.suffix.lower() not in READABLE_EXTS:
-                        continue
-                    if path.stat().st_size > MAX_FILE_MB * 1024 * 1024:
-                        continue
-                    key = str(path.resolve())
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    found.append(path)
-                except Exception:
-                    continue
+            display = folder.name or str(folder)
+            found_before = len(found)
+            print(f"DJ: scanning {display} ...", flush=True)
+            self._progress("scan", len(found), 0,
+                           f"Scanning {display}...")
+            try:
+                for root, dirs, files in os.walk(
+                        folder, followlinks=False,
+                        onerror=self._walk_error):
+                    # Prune junk folders here, in place, before
+                    # os.walk goes any deeper: they are never entered.
+                    dirs[:] = [d for d in dirs
+                               if d.lower() not in SKIP_DIRS
+                               and not d.startswith(".")]
+                    for name in files:
+                        if name.startswith("."):
+                            continue
+                        path = Path(root) / name
+                        try:
+                            if path.suffix.lower() not in READABLE_EXTS:
+                                continue
+                            if path.stat().st_size > \
+                                    MAX_FILE_MB * 1024 * 1024:
+                                continue
+                            key = str(path.resolve())
+                        except Exception:
+                            continue
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        found.append(path)
+                        if len(found) % 200 == 0:
+                            msg = (f"Scanning {display}... "
+                                   f"{len(found)} files found")
+                            print(f"DJ: {msg}", flush=True)
+                            self._progress("scan", len(found), 0, msg)
+            except OSError as e:
+                print(f"DJ: could not look inside {display}: {e} "
+                      f"(skipped)", flush=True)
+                continue
+            print(f"DJ: scanned {display}: "
+                  f"{len(found) - found_before} files found", flush=True)
+        print(f"DJ: scan done: {len(found)} readable files in total",
+              flush=True)
         return found
+
+    @staticmethod
+    def _walk_error(err: OSError):
+        """os.walk calls this when it cannot list a folder: note it
+        and carry on instead of stalling the whole build."""
+        print(f"DJ: could not read a folder: {err} (skipped)",
+              flush=True)
 
     # -- build ------------------------------------------------------------
     def build(self, folders: list) -> dict:
@@ -401,6 +449,11 @@ class Indexer:
 
         counts["seconds"] = round(time.time() - t0, 1)
         counts["vector_ok"] = self.vector_ok
+        mode = ("ready" if self.vector_ok
+                else "not available, keyword search only")
+        print(f"DJ: index built: {counts['files']} files, "
+              f"{counts['chunks']} chunks in {counts['seconds']}s "
+              f"(meaning search {mode})", flush=True)
         self._progress("done", total, total,
                        f"Done: {counts['files']} files, "
                        f"{counts['chunks']} chunks in {counts['seconds']}s.")
