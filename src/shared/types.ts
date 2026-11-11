@@ -19,6 +19,14 @@ export interface SearchResult {
   score: number;
 }
 
+/** A folder DJ knows about (recorded at index time, by name). */
+export interface IndexedFolder {
+  path: string;
+  name: string;
+  /** The folder this folder lives in. */
+  parent: string;
+}
+
 export type EmbedderState =
   | 'ready' // meaning search works
   | 'loading' // tiny model is loading inside the app
@@ -28,6 +36,8 @@ export type EmbedderState =
 export interface DjStatus {
   /** Files in the keyword index. */
   filesIndexed: number;
+  /** Folders recorded in the index (by name). */
+  foldersIndexed: number;
   /** True when meaning search (vectors) is usable. */
   vectorOk: boolean;
   /** The tiny embedding model's state. */
@@ -75,6 +85,7 @@ export type OrganizeRange =
 export type ChatAction =
   | { action: 'search'; query: string }
   | { action: 'open'; query: string }
+  | { action: 'openFolder'; query: string }
   | { action: 'summarize'; query: string }
   | { action: 'organize'; query: string }
   | { action: 'duplicates'; query: string }
@@ -122,7 +133,9 @@ export type ChatResponse =
       errors: string[];
     }
   | { kind: 'ask-range'; text: string }
-  | { kind: 'help'; text: string };
+  | { kind: 'help'; text: string }
+  /** Several folders matched — the user picks one. */
+  | { kind: 'folders'; text: string; folders: IndexedFolder[] };
 
 export interface IndexProgress {
   stage: 'scan' | 'read' | 'done';
@@ -134,6 +147,7 @@ export interface IndexProgress {
 
 export interface IndexCounts {
   files: number;
+  folders: number;
   chunks: number;
   embedded: number;
   keywordOnly: number;

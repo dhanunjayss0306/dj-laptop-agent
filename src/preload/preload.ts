@@ -22,6 +22,8 @@ const api: DjApi = {
     ipcRenderer.invoke(IPC.mergeDuplicates, { paths, targetFolder }),
   openApp: (name) => ipcRenderer.invoke(IPC.openApp, name),
   openFile: (filePath) => ipcRenderer.invoke(IPC.openFile, filePath),
+  pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
+  openFolder: (folderPath) => ipcRenderer.invoke(IPC.openFolder, folderPath),
 
   onIndexProgress: (cb) => {
     const listener = (_e: IpcRendererEvent, p: IndexProgress): void => cb(p);

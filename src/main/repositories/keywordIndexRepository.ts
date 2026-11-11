@@ -5,13 +5,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { IndexedFile } from '../domain/types';
+import type { IndexedFile, IndexedFolder } from '../domain/types';
 
 const FILE_NAME = 'keyword_index.json';
 
 export interface KeywordIndexFile {
   version: number;
   files: IndexedFile[];
+  /** Folders recorded at index time (v3.1+; missing in older indexes). */
+  folders: IndexedFolder[];
 }
 
 export class KeywordIndexRepository {
@@ -22,12 +24,19 @@ export class KeywordIndexRepository {
     try {
       if (fs.existsSync(p)) {
         const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as KeywordIndexFile;
-        if (Array.isArray(parsed.files)) return parsed;
+        // Older indexes (v3.0) have no folders list yet.
+        if (Array.isArray(parsed.files)) {
+          return {
+            version: parsed.version ?? 1,
+            files: parsed.files,
+            folders: Array.isArray(parsed.folders) ? parsed.folders : [],
+          };
+        }
       }
     } catch {
       // Corrupt index: start empty.
     }
-    return { version: 1, files: [] };
+    return { version: 1, files: [], folders: [] };
   }
 
   save(index: KeywordIndexFile): void {

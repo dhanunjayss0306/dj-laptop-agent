@@ -4,6 +4,7 @@ DJ is a private desktop app that lives on your laptop and only your laptop. Ask 
 
 DJ can also:
 
+- **Open folders** — "open the frontend folder" opens it in Explorer. Add any project folder (like AuPro) with the Add folder button in Folders, and DJ learns its folder names too.
 - **Summarize a file** — it picks the key sentences out of the file itself. DJ has no AI model, so the summary says so plainly.
 - **Organize Downloads** — for today, yesterday, the last few days, this week, or everything. It shows you every move first. Nothing moves until you say Yes. Nothing is ever deleted, nothing is ever overwritten.
 - **Find duplicate files** — extra copies of the same file. Delete the copies you pick (they go to the Recycle Bin, only after you confirm), or merge a group (keep one copy where it is, move the rest into one folder you pick).
@@ -54,33 +55,64 @@ If either command says "not recognized", close the black window, open it again, 
 1. In the same black window, type this and press **Enter** (replace `dhanu` with your Windows username if it is different):
 
    ```text
-   cd C:\Users\dhanu
+   cd C:\Users\dhanu\Downloads
    ```
 
-2. If you already have DJ's folder from before, update it:
+2. If you already have DJ's folder from before, delete it and get a fresh copy (the app was rebuilt from scratch, so an update will not work):
 
    ```text
-   cd dj-app
-   git pull
+   rmdir /s /q dj-laptop-agent
+   git clone https://github.com/dhanunjayss0306/dj-laptop-agent.git
+   cd dj-laptop-agent
    ```
-
-   If you do not have it yet, ask Muse for the folder — DJ is not published anywhere, it comes from your own copy.
 
 ### Step 4 — Install DJ's parts
 
-1. In the black window, make sure you are inside the `dj-app` folder. The line at the top of the window should end with `dj-app>`. If it does not, type:
+1. In the black window, make sure you are inside the `dj-laptop-agent` folder. The line at the top of the window should end with `dj-laptop-agent>`. If it does not, type:
 
    ```text
-   cd C:\Users\dhanu\dj-app
+   cd C:\Users\dhanu\Downloads\dj-laptop-agent
    ```
 
-2. Type this and press **Enter**. It downloads DJ's parts (about a minute, one time only):
+2. New npm versions block install scripts by default, and DJ needs them (they download Electron itself). Allow them with this one line and press **Enter**:
+
+   ```text
+   npm install-scripts approve electron && npm install-scripts approve esbuild && npm install-scripts approve onnxruntime-node && npm install-scripts approve sharp && npm install-scripts approve @astryxdesign/core && npm install-scripts approve protobufjs
+   ```
+
+3. Type this and press **Enter**. It downloads DJ's parts (about two minutes, one time only):
 
    ```text
    npm install
    ```
 
-   Wait until it finishes and the `>` prompt comes back.
+   Wait until it finishes and the `>` prompt comes back. The "deprecated" warnings and the "vulnerabilities" line are normal — ignore them. Do **not** run `npm audit fix --force`.
+
+4. Build DJ (one time only, and again after every `git pull`):
+
+   ```text
+   npm run build
+   ```
+
+### Step 4b — If Electron itself will not install (manual fix)
+
+Sometimes Electron's own program file does not download by itself, and `npm start` says "Electron failed to install correctly". The approve line above and `npm rebuild electron` should fix it, but if they do not, put the files in place by hand. Do this only if you see that error:
+
+1. Open Chrome and download this file (about 110 MB). It lands in your Downloads folder:
+
+   ```text
+   https://github.com/electron/electron/releases/download/v35.7.5/electron-v35.7.5-win32-x64.zip
+   ```
+
+2. In the black window, run these three lines, one at a time:
+
+   ```text
+   powershell -Command "Expand-Archive -Path $env:USERPROFILE\Downloads\electron-v35.7.5-win32-x64.zip -DestinationPath node_modules\electron\dist -Force"
+   powershell -Command "[System.IO.File]::WriteAllText('node_modules\electron\path.txt', 'electron.exe')"
+   dir node_modules\electron\dist
+   ```
+
+   The last line should show `electron.exe` in the list. Then run `npm start` again. (The `path.txt` file must contain exactly `electron.exe` — the second line writes it that way, with no extra line at the end.)
 
 ### Step 5 — Start DJ
 
@@ -90,14 +122,16 @@ Type this and press **Enter**:
 npm start
 ```
 
-DJ's window opens. The first time, it asks you to confirm the 5 folders it will search (Downloads, Desktop, Documents, Pictures, and your Antigravity folder). Tick the ones you want, click **Save**, and DJ builds its index. The first build takes a few minutes — the progress bar shows what it is doing. The tiny embedding model also downloads the first time (about 150 MB, once only); after that it is saved on your laptop.
+`npm start` builds DJ first and then opens it, so it always runs the newest code. DJ's window opens. The first time, it asks you to confirm the 5 folders it will search (Downloads, Desktop, Documents, Pictures, and your Antigravity folder). Tick the ones you want, click **Save**, and DJ builds its index. The first build takes a few minutes — the progress bar shows what it is doing. The tiny embedding model also downloads the first time (about 150 MB, once only); after that it is saved on your laptop.
 
-That is it. From then on, just run `npm start` from the `dj-app` folder whenever you want DJ.
+That is it. From then on, just run `npm start` from the `dj-laptop-agent` folder whenever you want DJ. (`npm run dev` is for developers only: it starts the Vite page server with live reload instead of the built app.)
 
 ### If DJ's window does not open
 
-- Make sure the black window says you are in the `dj-app` folder (`cd C:\Users\dhanu\dj-app`).
-- Run `npm install` again, then `npm start` again.
+- Make sure the black window says you are in the `dj-laptop-agent` folder (`cd C:\Users\dhanu\Downloads\dj-laptop-agent`).
+- If you see "Electron failed to install correctly", the install scripts were blocked: run the approve line from Step 4, then delete `node_modules` (`rmdir /s /q node_modules`), then `npm install` again, then `npm run build`, then `npm start`.
+- If you see "Cannot find module 'dist/main/main.js'", run `npm run build` first, then `npm start`.
+- If DJ opens but the window is blank, close it and run `npm start` again — DJ now falls back to the built app when the developer page server is not running.
 - If Windows Smart App Control blocks something, do **not** turn Smart App Control off — once off, it cannot be turned back on without reinstalling Windows. Send Muse the exact message on the screen instead.
 
 ## For developers
@@ -138,7 +172,7 @@ Layers, like a Java project: **ipc** (routes) → **services** (logic) → **rep
 
 ```text
 npm run dev      Develop: Vite + Electron with live reload
-npm start        Run the built app
+npm start        Normal way to run DJ: build + run the built app
 npm run build    Build main (tsc) + renderer (Vite)
 npm test         Run the test suite (Vitest)
 npm run pack     Build + make a Windows installer (needs Windows)

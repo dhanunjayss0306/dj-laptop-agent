@@ -1,6 +1,10 @@
-// DJ v3 — renderer entry point.
+// DJ v3.1 — renderer entry point.
 // Wires the tiny local embedding model (embedder.ts) to the main process
-// once, at startup, then renders the app inside the Astryx neutral theme.
+// once, at startup, then renders the app inside the Astryx neutral theme
+// in DARK mode — DJ looks like the Muse chat: dark background, light
+// text, subtle borders, blue accent. The neutral theme's dark palette
+// supplies the tones (body #1b1b1b, surface #262626, borders #303030),
+// and index.css below uses the same values for the app's own surfaces.
 
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
@@ -27,7 +31,7 @@ if (!root) {
 
 createRoot(root).render(
   <React.StrictMode>
-    <Theme theme={neutralTheme}>
+    <Theme theme={neutralTheme} mode="dark">
       <App />
     </Theme>
   </React.StrictMode>,

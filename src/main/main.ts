@@ -33,9 +33,17 @@ function createWindow(): BrowserWindow {
   });
 
   if (isDev) {
+    // In development the window loads the Vite dev server. But `npm
+    // start` runs `electron .` WITHOUT the dev server — the window
+    // used to come up blank (chrome-error://chromewebdata/). So when
+    // the dev server fails to load, fall back to the built file
+    // (dist/renderer/index.html) instead of staying blank.
+    const builtFile = path.join(__dirname, '..', 'renderer', 'index.html');
     const devUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
+    win.webContents.once('did-fail-load', () => {
+      void win.loadFile(builtFile);
+    });
     void win.loadURL(devUrl);
-    win.webContents.openDevTools({ mode: 'detach' });
   } else {
     // Production: dist/main/main.js -> dist/renderer/index.html.
     void win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));

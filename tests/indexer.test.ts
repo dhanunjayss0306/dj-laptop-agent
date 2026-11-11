@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { IndexService } from '../src/main/services/indexService';
+import { IndexService, rankFolders } from '../src/main/services/indexService';
 import { EmbedderClient } from '../src/main/services/embedderClient';
 import { chunkText, countOccurrences } from '../src/main/utils/text';
 
@@ -134,5 +134,99 @@ describe('build: keyword-only when embeddings are unavailable', () => {
     const counts = await indexer.build([root]);
     expect(counts.files).toBe(0);
     expect(indexer.hasIndex()).toBe(false);
+  });
+});
+
+describe('iterFolders: folders by name, same skip rules as files', () => {
+  it('records directories, skips junk and hidden folders, includes the root', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dj-fold-'));
+    for (const dir of [
+      'frontend',
+      'frontend/components',
+      'backend',
+      'node_modules/pkg',
+      '.git/objects',
+      '.hidden/secret',
+    ]) {
+      fs.mkdirSync(path.join(root, dir), { recursive: true });
+    }
+    fs.writeFileSync(path.join(root, 'frontend/index.html'), '<html></html>');
+    const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
+    const found = indexer
+      .iterFolders([root])
+      .map((f) => path.relative(root, f.path))
+      .sort();
+    expect(found).toEqual(['', 'backend', 'frontend', 'frontend/components']);
+  });
+  it('a missing folder gives an empty list', () => {
+    const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
+    expect(indexer.iterFolders(['/does/not/exist/xyz'])).toEqual([]);
+  });
+});
+
+describe('rankFolders: exact name wins, project breaks ties', () => {
+  const folders = [
+    { path: '/projects/AuPro/frontend', name: 'frontend', parent: '/projects/AuPro' },
+    { path: '/projects/OtherApp/frontend', name: 'frontend', parent: '/projects/OtherApp' },
+    { path: '/projects/AuPro/backend', name: 'backend', parent: '/projects/AuPro' },
+    { path: '/projects/AuPro', name: 'AuPro', parent: '/projects' },
+  ];
+  it('an exact name match comes first', () => {
+    const ranked = rankFolders(folders, 'backend');
+    expect(ranked[0].name).toBe('backend');
+    expect(ranked).toHaveLength(1);
+  });
+  it('the project word picks AuPro frontend over the other frontend', () => {
+    const ranked = rankFolders(folders, 'frontend AuPro');
+    expect(ranked[0].path).toBe('/projects/AuPro/frontend');
+  });
+  it('"AuPro frontend" returns only AuPro\'s frontend, not weaker matches', () => {
+    const ranked = rankFolders(folders, 'frontend AuPro');
+    expect(ranked.map((f) => f.path)).toEqual(['/projects/AuPro/frontend']);
+  });
+  it('a bare frontend returns both frontends, AuPro first (shorter path)', () => {
+    const ranked = rankFolders(folders, 'frontend');
+    expect(ranked.map((f) => f.path)).toEqual([
+      '/projects/AuPro/frontend',
+      '/projects/OtherApp/frontend',
+    ]);
+  });
+  it('a partial name still matches', () => {
+    const ranked = rankFolders(folders, 'front');
+    expect(ranked.map((f) => f.name)).toEqual(['frontend', 'frontend']);
+  });
+  it('an unknown name finds nothing', () => {
+    expect(rankFolders(folders, 'zzqxwv')).toEqual([]);
+  });
+  it('an empty query finds nothing', () => {
+    expect(rankFolders(folders, '')).toEqual([]);
+  });
+});
+
+describe('build: folders are saved with the index', () => {
+  it('build counts folders and findFolders uses them', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-'));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dj-fold-'));
+    fs.mkdirSync(path.join(root, 'AuPro', 'frontend'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'AuPro', 'frontend', 'index.html'),
+      '<html>AuPro site</html>',
+    );
+    const indexer = makeIndexer(dataDir);
+    const counts = await indexer.build([root]);
+    // AuPro + AuPro/frontend + the root itself.
+    expect(counts.folders).toBe(3);
+    expect(indexer.listFolders().map((f) => f.name).sort()).toEqual([
+      'AuPro',
+      path.basename(root),
+      'frontend',
+    ]);
+    const matches = indexer.findFolders('frontend');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].path).toBe(path.join(root, 'AuPro', 'frontend'));
+    // A fresh indexer loads the folders back from disk.
+    const reloaded = makeIndexer(dataDir);
+    reloaded.loadFromDisk();
+    expect(reloaded.listFolders()).toHaveLength(3);
   });
 });

@@ -33,6 +33,10 @@ export const IPC = {
   mergeDuplicates: 'dj:merge-duplicates',
   openApp: 'dj:open-app',
   openFile: 'dj:open-file',
+  /** Renderer -> main: ask the user to pick a folder to add. */
+  pickFolder: 'dj:pick-folder',
+  /** Renderer -> main: open a folder in the file manager. */
+  openFolder: 'dj:open-folder',
   /** Main -> renderer: index-build progress. */
   indexProgress: 'dj:index-progress',
   /** Main -> renderer: main asks the renderer embedder to embed texts. */
@@ -69,6 +73,10 @@ export interface DjApi {
   ): Promise<{ moved: string[]; errors: string[] }>;
   openApp(name: string): Promise<{ ok: boolean; message: string }>;
   openFile(path: string): Promise<{ ok: boolean; message: string }>;
+  /** Ask the user to pick a folder (native dialog). Null when cancelled. */
+  pickFolder(): Promise<string | null>;
+  /** Open a folder in the file manager. */
+  openFolder(path: string): Promise<{ ok: boolean; message: string }>;
   /** Index-build progress events. Returns an unsubscribe function. */
   onIndexProgress(cb: (p: IndexProgress) => void): () => void;
   /** Embed requests from main. Returns an unsubscribe function. */

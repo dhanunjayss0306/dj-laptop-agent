@@ -3,6 +3,7 @@
 // swap per platform.
 
 import { execFile } from 'child_process';
+import { shell } from 'electron';
 
 /** Open a file with the app Windows (or the OS) chose for it. */
 export function openFile(filePath: string): Promise<{ ok: boolean; message: string }> {
@@ -19,4 +20,15 @@ export function openFile(filePath: string): Promise<{ ok: boolean; message: stri
       });
     }
   });
+}
+
+/** Open a folder in the file manager (Explorer on Windows). */
+export async function openFolder(folderPath: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const error = await shell.openPath(folderPath);
+    if (error) return { ok: false, message: `I could not open that folder: ${error}` };
+    return { ok: true, message: `Opened ${folderPath}.` };
+  } catch (err) {
+    return { ok: false, message: `I could not open that folder: ${String(err)}` };
+  }
 }

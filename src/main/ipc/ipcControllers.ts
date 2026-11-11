@@ -3,7 +3,7 @@
 // is thin — it checks the input, calls a service, and returns the
 // result. The services do the real work.
 
-import { ipcMain, type BrowserWindow } from 'electron';
+import { dialog, ipcMain, type BrowserWindow } from 'electron';
 
 import type {
   AppConfig,
@@ -22,7 +22,7 @@ import type { EmbedderClient } from '../services/embedderClient';
 import type { IndexService } from '../services/indexService';
 import type { ChatService } from '../services/chatService';
 import { openApp } from '../services/appLauncher';
-import { openFile } from '../services/actions';
+import { openFile, openFolder } from '../services/actions';
 import { DuplicateService } from '../services/duplicateService';
 import { getDownloadsDir, getHomeDir } from '../utils/paths';
 
@@ -46,9 +46,10 @@ export function registerIpc(ctx: ControllerContext): void {
 
   ipcMain.handle(IPC.getStatus, (): DjStatus => {
     const config = configRepo.load();
-    const { filesIndexed, vectorOk } = indexer.status();
+    const { filesIndexed, foldersIndexed, vectorOk } = indexer.status();
     return {
       filesIndexed,
+      foldersIndexed,
       vectorOk,
       embedderState: embedder.state,
       hasIndex: indexer.hasIndex(),
@@ -128,6 +129,20 @@ export function registerIpc(ctx: ControllerContext): void {
 
   ipcMain.handle(IPC.openFile, async (_e, filePath: string): Promise<{ ok: boolean; message: string }> => {
     return openFile(filePath);
+  });
+
+  ipcMain.handle(IPC.openFolder, async (_e, folderPath: string): Promise<{ ok: boolean; message: string }> => {
+    return openFolder(folderPath);
+  });
+
+  ipcMain.handle(IPC.pickFolder, async (): Promise<string | null> => {
+    const win = ctx.getWindow();
+    if (!win || win.isDestroyed()) return null;
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 
   // -- embedder answers from the renderer --------------------------------------

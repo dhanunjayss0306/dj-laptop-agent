@@ -45,6 +45,23 @@ export function FoldersDialog({
     });
   };
 
+  const remove = (path: string) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      return { folders: prev.folders.filter((f) => f.path !== path) };
+    });
+  };
+
+  const addFolder = async () => {
+    const picked = await window.dj.pickFolder();
+    if (!picked) return;
+    setDraft((prev) => {
+      if (!prev) return prev;
+      if (prev.folders.some((f) => f.path === picked)) return prev;
+      return { folders: [...prev.folders, { path: picked, enabled: true }] };
+    });
+  };
+
   const enabledCount = draft?.folders.filter((f) => f.enabled).length ?? 0;
 
   return (
@@ -69,14 +86,25 @@ export function FoldersDialog({
         ) : (
           draft.folders.map((folder) => (
             <div className="dj-folder-row" key={folder.path}>
-              <CheckboxInput
-                label={folder.path}
-                value={folder.enabled}
-                onChange={(checked) => toggle(folder.path, checked)}
+              <span className="dj-folder-check">
+                <CheckboxInput
+                  label={folder.path}
+                  value={folder.enabled}
+                  onChange={(checked) => toggle(folder.path, checked)}
+                />
+              </span>
+              <Button
+                label="Remove"
+                variant="ghost"
+                size="sm"
+                onClick={() => remove(folder.path)}
               />
             </div>
           ))
         )}
+        <div className="dj-row">
+          <Button label="Add folder" variant="secondary" onClick={() => void addFolder()} />
+        </div>
         <div className="dj-dialog-actions">
           {!isFirstRun && (
             <Button label="Cancel" variant="ghost" onClick={() => onOpenChange(false)} />

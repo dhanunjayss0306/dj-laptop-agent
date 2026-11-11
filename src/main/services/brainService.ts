@@ -5,6 +5,7 @@
 // Actions:
 //   search     — find files by name or topic
 //   open       — open a file the user names, or files about a topic
+//   openFolder — open a folder the user names ("open the frontend folder")
 //   summarize  — summarize a file the user names
 //   organize   — organize Downloads for a date range
 //   duplicates — find extra copies of the same file
@@ -43,6 +44,8 @@ export const HELP_TEXT = [
   'Here is what I can do:',
   '• find my Virun pitch — find files by name or topic',
   '• open something about travel and tourism — open files by what is inside them',
+  '• open the frontend folder — open a folder by name (in Explorer)',
+  '• open index.html in AuPro — open a file inside a project folder',
   '• summarize my Virun pitch — a short summary of a file',
   "• organize yesterday's Downloads — tidy Downloads (today, yesterday, last 3 days, this week, everything)",
   '• find duplicates — find extra copies of the same file',
@@ -53,8 +56,10 @@ export const HELP_TEXT = [
 ].join('\n');
 
 export class BrainService {
-  /** Turn the user's words into an action. Always returns one. */
-  decide(text: string): ChatAction {
+  /** Turn the user's words into an action. Always returns one.
+   * @param knownFolders folder names DJ knows (from the index) —
+   *   a query naming one of them routes to open-folder. */
+  decide(text: string, knownFolders: string[] = []): ChatAction {
     const raw = (text || '').trim();
     const low = raw.toLowerCase();
     if (!low) return { action: 'help', query: '' };
@@ -90,6 +95,16 @@ export class BrainService {
       return { action: 'summarize', query: query || raw };
     }
 
+    // "open the frontend folder" / "open that related folder in
+    // frontend" — the word "folder" (or "directory") means the user
+    // wants a folder opened, not a file.
+    const folderQuery = extractFolderQuery(raw);
+    if (folderQuery !== null) {
+      return { action: 'openFolder', query: folderQuery };
+    }
+
+    const known = new Set(knownFolders.map((f) => f.toLowerCase()));
+
     if (low.startsWith('open ')) {
       let rest = raw.slice(5).trim();
       rest = rest.replace(
@@ -99,6 +114,11 @@ export class BrainService {
       rest = rest.replace(/^(something|anything)\s+about\s+/i, '');
       if (KNOWN_APPS.has(rest.toLowerCase())) {
         return { action: 'openApp', query: rest.toLowerCase() };
+      }
+      // "open frontend" — naming a folder DJ knows opens the folder.
+      const folderCandidate = rest.replace(/^(the|a|an|my)\s+/i, '').trim();
+      if (folderCandidate && known.has(folderCandidate.toLowerCase())) {
+        return { action: 'openFolder', query: folderCandidate };
       }
       return { action: 'open', query: rest || raw };
     }
@@ -113,7 +133,12 @@ export class BrainService {
       'show me ',
     ]) {
       if (low.startsWith(word)) {
-        return { action: 'search', query: raw.slice(word.length).trim() };
+        const query = raw.slice(word.length).trim();
+        const folderCandidate = query.replace(/^(the|a|an|my)\s+/i, '').trim();
+        if (folderCandidate && known.has(folderCandidate.toLowerCase())) {
+          return { action: 'openFolder', query: folderCandidate };
+        }
+        return { action: 'search', query };
       }
     }
 
@@ -124,6 +149,56 @@ export class BrainService {
     // Default: the user just named a topic — search for it.
     return { action: 'search', query: raw };
   }
+}
+
+/**
+ * The folder a "… folder …" message asks for, or null when the
+ * message is not about a folder at all. "" means "a folder, but no
+ * name given" — the chat service then lists the folders DJ knows.
+ *
+ *   "open the frontend folder" -> "frontend"
+ *   "open AuPro frontend folder" -> "AuPro frontend"
+ *   "open that related folder in frontend" -> "frontend"
+ *   "find the frontend folder" -> "frontend"
+ */
+export function extractFolderQuery(text: string): string | null {
+  const low = (text || '').toLowerCase();
+  const folderIdx = low.search(/\b(?:folder|folders|directory|directories)\b/);
+  if (folderIdx < 0) return null;
+  // The name sits between the LAST verb before "folder" and "folder"
+  // itself ("I want to find something, open the frontend folder").
+  const before = text.slice(0, folderIdx);
+  const verbMatches = [...before.matchAll(/\b(?:open|find|show|go to|go)\b/gi)];
+  let name = '';
+  if (verbMatches.length > 0) {
+    const last = verbMatches[verbMatches.length - 1];
+    name = cleanFolderWords(before.slice(last.index + last[0].length));
+  }
+  // "... folder in <project>" — the words after "in" are the project
+  // the folder lives in ("open the frontend folder in AuPro").
+  const inAfter = text
+    .slice(folderIdx)
+    .match(/\b(?:folder|directory)\b[^a-z0-9]*in\s+([a-z0-9][a-z0-9 ]*?)\s*$/i);
+  const project = inAfter ? cleanFolderWords(inAfter[1]) : '';
+  if (name && project) return `${name} ${project}`;
+  if (name) return name;
+  if (project) return project;
+  return '';
+}
+
+/** Drop filler words from a folder name ("the frontend" -> "frontend"). */
+function cleanFolderWords(s: string): string {
+  return s
+    .split(/\s+/)
+    .filter(
+      (w) =>
+        w.length > 0 &&
+        !['the', 'a', 'an', 'that', 'this', 'related', 'my', 'me'].includes(
+          w.toLowerCase(),
+        ),
+    )
+    .join(' ')
+    .trim();
 }
 
 /**

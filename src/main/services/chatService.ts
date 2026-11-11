@@ -4,12 +4,12 @@
 // layer: the brain decides, the services act, this file only wires
 // them together.
 
-import type { ChatResponse, OrganizeMove, OrganizeRange } from '../../shared/types';
+import type { ChatResponse, OrganizeMove, OrganizeRange, SearchResult } from '../../shared/types';
 import type { IndexService } from './indexService';
 import { BrainService, HELP_TEXT, parseOrganizeRange, rangeLabel } from './brainService';
 import { DuplicateService } from './duplicateService';
 import { openApp } from './appLauncher';
-import { openFile } from './actions';
+import { openFile, openFolder } from './actions';
 import { OrganizeService } from './organizeService';
 import { summarizeText } from './summarizeService';
 import { getDownloadsDir, getHomeDir } from '../utils/paths';
@@ -27,35 +27,40 @@ export class ChatService {
 
   /** Handle one user message. Always returns a response. */
   async handle(text: string): Promise<ChatResponse> {
-    const action = this.brain.decide(text);
+    // The brain needs the folder names DJ knows, so "open frontend"
+    // can route to a folder instead of a file search.
+    const knownFolders = this.indexer.listFolders().map((f) => f.name);
+    const action = this.brain.decide(text, knownFolders);
     switch (action.action) {
       case 'help':
         return { kind: 'help', text: HELP_TEXT };
 
       case 'search': {
-        const results = await this.indexer.search(action.query, 8);
+        const { query, hint } = splitFolderHint(action.query);
+        const results = preferInFolder(await this.indexer.search(query, 8), hint);
         if (results.length === 0) {
           return {
             kind: 'message',
             text:
-              `I could not find anything about '${action.query}' in your folders.\n\n` +
+              `I could not find anything about '${query}' in your folders.\n\n` +
               'Try different words, or click Rebuild index if you added files recently.\n\n' +
               HELP_TEXT,
           };
         }
         return {
           kind: 'search',
-          text: `I found ${results.length} file(s) about '${action.query}'. Click Open on any of them.`,
+          text: `I found ${results.length} file(s) about '${query}'. Click Open on any of them.`,
           results,
         };
       }
 
       case 'open': {
-        const results = await this.indexer.search(action.query, 8);
+        const { query, hint } = splitFolderHint(action.query);
+        const results = preferInFolder(await this.indexer.search(query, 8), hint);
         if (results.length === 0) {
           return {
             kind: 'message',
-            text: `I could not find a file about '${action.query}'.`,
+            text: `I could not find a file about '${query}'.`,
           };
         }
         const top = results[0];
@@ -66,6 +71,45 @@ export class ChatService {
             ? `Opened ${top.name}.`
             : `${opened.message} Here is what I found instead:`,
           results,
+        };
+      }
+
+      case 'openFolder': {
+        const matches = this.indexer.findFolders(action.query);
+        if (matches.length === 0) {
+          const known = this.indexer.listFolders();
+          if (known.length === 0) {
+            return {
+              kind: 'message',
+              text:
+                `I don't know a folder called '${action.query}' yet — I only learn folder names when the index is built.\n\n` +
+                'Click Rebuild index once, then ask again.',
+            };
+          }
+          return {
+            kind: 'message',
+            text:
+              `I don't know a folder called '${action.query}'.\n\n` +
+              `Folders I know:\n${known
+                .slice(0, 12)
+                .map((f) => `• ${f.name} — ${f.path}`)
+                .join('\n')}`,
+          };
+        }
+        if (matches.length === 1) {
+          const folder = matches[0];
+          const opened = await openFolder(folder.path);
+          return {
+            kind: 'message',
+            text: opened.ok
+              ? `Opened the ${folder.name} folder.`
+              : opened.message,
+          };
+        }
+        return {
+          kind: 'folders',
+          text: `I found ${matches.length} folders matching '${action.query}'. Pick one:`,
+          folders: matches,
         };
       }
 
@@ -193,4 +237,31 @@ export class ChatService {
   mergeDuplicates(paths: string[], targetFolder: string): { moved: string[]; errors: string[] } {
     return this.duplicates.merge(paths, targetFolder);
   }
+}
+
+/**
+ * Split "index.html in AuPro" into the file to find ("index.html")
+ * and the project hint ("AuPro"). Without " in " there is no hint.
+ */
+export function splitFolderHint(query: string): { query: string; hint: string } {
+  const m = (query || '').match(/^(.+?)\s+in\s+([a-z0-9][a-z0-9 ]*?)\s*$/i);
+  if (!m) return { query: query.trim(), hint: '' };
+  return { query: m[1].trim(), hint: m[2].trim() };
+}
+
+/**
+ * Prefer search results that live under the hinted project folder
+ * ("open index.html in AuPro" opens AuPro's index.html, not another
+ * project's). Results without the hint keep their order after the
+ * matching ones. No hint, no change.
+ */
+export function preferInFolder(results: SearchResult[], hint: string): SearchResult[] {
+  const h = (hint || '').trim().toLowerCase();
+  if (!h) return results;
+  const matching = results.filter(
+    (r) => r.folder.toLowerCase().includes(h) || r.path.toLowerCase().includes(h),
+  );
+  if (matching.length === 0) return results;
+  const rest = results.filter((r) => !matching.includes(r));
+  return [...matching, ...rest];
 }

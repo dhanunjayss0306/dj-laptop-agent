@@ -8,6 +8,14 @@ export interface IndexedFile {
   text: string;
 }
 
+/** A folder DJ knows about (recorded at index time, by name). */
+export interface IndexedFolder {
+  path: string;
+  name: string;
+  /** The folder this folder lives in. */
+  parent: string;
+}
+
 export interface ChunkRecord {
   id: string;
   path: string;

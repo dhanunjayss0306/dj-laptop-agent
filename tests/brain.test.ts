@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BrainService,
+  extractFolderQuery,
   parseOrganizeRange,
   parseOrganizeRangeText,
   rangeLabel,
@@ -217,5 +218,95 @@ describe('rangeLabel', () => {
     expect(rangeLabel({ kind: 'lastDays', days: 3 })).toBe('the last 3 days');
     expect(rangeLabel({ kind: 'lastDays', days: 1 })).toBe('the last 1 day');
     expect(rangeLabel({ kind: 'all' })).toBe('all files');
+  });
+});
+
+describe('decide: open folders', () => {
+  it('open the frontend folder', () => {
+    expect(brain.decide('open the frontend folder')).toEqual({
+      action: 'openFolder',
+      query: 'frontend',
+    });
+  });
+  it('open AuPro frontend folder', () => {
+    expect(brain.decide('open AuPro frontend folder')).toEqual({
+      action: 'openFolder',
+      query: 'AuPro frontend',
+    });
+  });
+  it('open the frontend folder in AuPro', () => {
+    expect(brain.decide('open the frontend folder in AuPro')).toEqual({
+      action: 'openFolder',
+      query: 'frontend AuPro',
+    });
+  });
+  it('open that related folder in frontend', () => {
+    expect(brain.decide('open that related folder in frontend')).toEqual({
+      action: 'openFolder',
+      query: 'frontend',
+    });
+  });
+  it('a long sentence about changing the website', () => {
+    expect(
+      brain.decide(
+        'I want to change this on the website, open that related folder in frontend',
+      ),
+    ).toEqual({ action: 'openFolder', query: 'frontend' });
+  });
+  it('find the frontend folder', () => {
+    expect(brain.decide('find the frontend folder')).toEqual({
+      action: 'openFolder',
+      query: 'frontend',
+    });
+  });
+  it('open the folder (no name) lists known folders', () => {
+    expect(brain.decide('open the folder')).toEqual({ action: 'openFolder', query: '' });
+  });
+  it('open frontend with a known folder routes to the folder', () => {
+    expect(brain.decide('open frontend', ['frontend', 'backend'])).toEqual({
+      action: 'openFolder',
+      query: 'frontend',
+    });
+  });
+  it('open frontend without a known folder stays a file open', () => {
+    expect(brain.decide('open frontend')).toEqual({ action: 'open', query: 'frontend' });
+  });
+  it('open the frontend (known folder, no "folder" word)', () => {
+    expect(brain.decide('open the frontend', ['frontend'])).toEqual({
+      action: 'openFolder',
+      query: 'frontend',
+    });
+  });
+  it('open index.html stays a file open', () => {
+    expect(brain.decide('open index.html')).toEqual({ action: 'open', query: 'index.html' });
+  });
+  it('open index.html in AuPro keeps the project hint', () => {
+    expect(brain.decide('open index.html in AuPro')).toEqual({
+      action: 'open',
+      query: 'index.html in AuPro',
+    });
+  });
+  it('open notepad still opens the app, not a folder', () => {
+    expect(brain.decide('open notepad', ['notepad'])).toEqual({
+      action: 'openApp',
+      query: 'notepad',
+    });
+  });
+});
+
+describe('extractFolderQuery', () => {
+  it('open the frontend folder -> frontend', () => {
+    expect(extractFolderQuery('open the frontend folder')).toBe('frontend');
+  });
+  it('open that related folder in frontend -> frontend', () => {
+    expect(extractFolderQuery('open that related folder in frontend')).toBe('frontend');
+  });
+  it('a sentence with an earlier verb uses the last verb', () => {
+    expect(
+      extractFolderQuery('i want to find something, open the frontend folder'),
+    ).toBe('frontend');
+  });
+  it('no folder word -> null', () => {
+    expect(extractFolderQuery('open my virun pitch')).toBeNull();
   });
 });

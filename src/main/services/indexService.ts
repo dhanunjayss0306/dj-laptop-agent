@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { IndexCounts, IndexProgress, SearchResult } from '../../shared/types';
-import type { IndexedFile } from '../domain/types';
+import type { IndexedFile, IndexedFolder } from '../domain/types';
 import { KeywordIndexRepository } from '../repositories/keywordIndexRepository';
 import { EMBED_FORMAT_VERSION } from '../repositories/vectorRepository';
 import { fileId } from '../utils/hashing';
@@ -53,6 +53,7 @@ export class IndexService {
   private readonly keywordRepo: KeywordIndexRepository;
   private readonly store: VectorStore;
   private keywordFiles: IndexedFile[] = [];
+  private keywordFolders: IndexedFolder[] = [];
 
   /** True when the vector store has usable vectors. */
   vectorOk = false;
@@ -70,7 +71,9 @@ export class IndexService {
 
   /** Load whatever index is already on disk (app restart). */
   loadFromDisk(): void {
-    this.keywordFiles = this.keywordRepo.load().files;
+    const saved = this.keywordRepo.load();
+    this.keywordFiles = saved.files;
+    this.keywordFolders = saved.folders ?? [];
     this.vectorOk = this.store.loadFromDisk();
   }
 
@@ -91,8 +94,22 @@ export class IndexService {
     return this.store.storedFormat() !== EMBED_FORMAT_VERSION;
   }
 
-  status(): { filesIndexed: number; vectorOk: boolean } {
-    return { filesIndexed: this.keywordFiles.length, vectorOk: this.vectorOk };
+  status(): { filesIndexed: number; foldersIndexed: number; vectorOk: boolean } {
+    return {
+      filesIndexed: this.keywordFiles.length,
+      foldersIndexed: this.keywordFolders.length,
+      vectorOk: this.vectorOk,
+    };
+  }
+
+  /** Every folder DJ knows about, by name (for "open the frontend folder"). */
+  listFolders(): IndexedFolder[] {
+    return [...this.keywordFolders].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Best-matching folders for a query, best first (empty when none). */
+  findFolders(query: string): IndexedFolder[] {
+    return rankFolders(this.keywordFolders, query);
   }
 
   // -- walking ----------------------------------------------------------
@@ -150,6 +167,7 @@ export class IndexService {
     dir: string,
     onFile: (filePath: string) => void,
     seen: Set<string>,
+    onDir?: (dirPath: string) => void,
   ): void {
     let entries: fs.Dirent[];
     try {
@@ -165,7 +183,8 @@ export class IndexService {
         if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
         if (entry.name.startsWith('.')) continue;
         if (entry.isSymbolicLink()) continue;
-        this.walkDir(full, onFile, seen);
+        onDir?.(full);
+        this.walkDir(full, onFile, seen, onDir);
       } else if (entry.isFile()) {
         if (entry.name.startsWith('.')) continue;
         if (!READABLE_EXTS.has(path.extname(entry.name).toLowerCase())) continue;
@@ -192,10 +211,53 @@ export class IndexService {
 
   // -- build ------------------------------------------------------------
 
+  /**
+   * Every directory under the given folders, by name — so DJ can open
+   * a folder ("open the frontend folder"). Same skip rules as files:
+   * junk and hidden folders are never recorded. The roots themselves
+   * count too (so "open AuPro" works when AuPro is an indexed folder).
+   */
+  iterFolders(folders: string[]): IndexedFolder[] {
+    const found: IndexedFolder[] = [];
+    const seen = new Set<string>();
+    const record = (dirPath: string): void => {
+      let key: string;
+      try {
+        key = fs.realpathSync(dirPath);
+      } catch {
+        key = dirPath;
+      }
+      if (seen.has(key)) return;
+      seen.add(key);
+      found.push({
+        path: dirPath,
+        name: path.basename(dirPath) || dirPath,
+        parent: path.dirname(dirPath),
+      });
+    };
+    for (const folder of folders) {
+      if (!isDirectory(folder)) continue;
+      record(folder);
+      try {
+        this.walkDir(
+          folder,
+          () => {},
+          new Set<string>(),
+          (dirPath) => record(dirPath),
+        );
+      } catch (err) {
+        console.log(`DJ: could not list folders in ${folder}: ${err} (skipped)`);
+        continue;
+      }
+    }
+    return found;
+  }
+
   /** Build (or rebuild) the whole index. Returns counts. */
   async build(folders: string[]): Promise<IndexCounts> {
     const counts: IndexCounts = {
       files: 0,
+      folders: 0,
       chunks: 0,
       embedded: 0,
       keywordOnly: 0,
@@ -288,9 +350,12 @@ export class IndexService {
     }
     await flushBatch();
 
-    // Save the keyword index.
+    // Save the keyword index, with the folder list beside it.
+    const foldersFound = this.iterFolders(folders);
+    counts.folders = foldersFound.length;
     this.keywordFiles = keywordFiles;
-    this.keywordRepo.save({ version: 1, files: keywordFiles });
+    this.keywordFolders = foldersFound;
+    this.keywordRepo.save({ version: 1, files: keywordFiles, folders: foldersFound });
 
     // Save vectors only when the build produced them.
     if (vectorOk && newRows.length > 0) {
@@ -305,7 +370,7 @@ export class IndexService {
     counts.vectorOk = this.vectorOk;
     const mode = this.vectorOk ? 'ready' : 'not available, keyword search only';
     console.log(
-      `DJ: index built: ${counts.files} files, ${counts.chunks} chunks in ${counts.seconds}s (meaning search ${mode})`,
+      `DJ: index built: ${counts.files} files, ${counts.folders} folders, ${counts.chunks} chunks in ${counts.seconds}s (meaning search ${mode})`,
     );
     this.progress(
       'done',
@@ -398,6 +463,68 @@ export class IndexService {
     rows.sort((a, b) => b.mtime - a.mtime);
     return rows.slice(0, topN);
   }
+}
+
+/** Words that carry no meaning in a folder query ("open the frontend folder"). */
+const FOLDER_STOPWORDS = new Set([
+  'folder', 'folders', 'directory', 'directories', 'the', 'a', 'an', 'in',
+  'open', 'find', 'show', 'go', 'to', 'that', 'this', 'related', 'please',
+]);
+
+/**
+ * Rank folders for a query, best first (at most 8). Pure function —
+ * easy to test. Scoring: an exact name match wins; a query whose
+ * words all appear across the name and the parent path (e.g.
+ * "AuPro frontend" for the frontend folder inside AuPro) is nearly
+ * as strong; a partial name match is weaker; a word in the parent
+ * path (the project) breaks ties between same-named folders in
+ * different projects. Only folders close to the best score are
+ * returned — a clear winner does not drag weaker matches along.
+ */
+export function rankFolders(folders: IndexedFolder[], query: string): IndexedFolder[] {
+  const words = (query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 0 && !FOLDER_STOPWORDS.has(w));
+  if (words.length === 0) return [];
+  const phrase = words.join(' ');
+  const scored: { score: number; folder: IndexedFolder }[] = [];
+  for (const folder of folders) {
+    const name = folder.name.toLowerCase();
+    const parent = folder.parent.toLowerCase();
+    const fullPath = folder.path.toLowerCase();
+    let score = 0;
+    if (name === phrase) {
+      score += 100;
+    } else if (words.every((w) => name.includes(w) || parent.includes(w))) {
+      // Every word appears somewhere in name + parent: the folder is
+      // the one the user described ("AuPro frontend").
+      score += 70;
+    } else {
+      for (const w of words) {
+        if (name.includes(w)) score += 25;
+      }
+      let parentHits = 0;
+      for (const w of words) {
+        if (parent.includes(w)) parentHits += 1;
+      }
+      score += Math.min(parentHits * 10, 20);
+    }
+    if (fullPath.includes(phrase)) score += 15;
+    if (score > 0) scored.push({ score, folder });
+  }
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.folder.path.length - b.folder.path.length ||
+      a.folder.name.localeCompare(b.folder.name),
+  );
+  if (scored.length === 0) return [];
+  const best = scored[0].score;
+  return scored
+    .filter((s) => s.score >= best - 20)
+    .slice(0, 8)
+    .map((s) => s.folder);
 }
 
 function isDirectory(p: string): boolean {

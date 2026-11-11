@@ -11,6 +11,7 @@ import { DuplicatesBlock } from './DuplicateGroupCard';
 
 export interface ChatMessageActions {
   onOpenFile: (path: string) => void;
+  onOpenFolder: (path: string) => void;
   onPlanOrganize: (range: OrganizeRange) => void;
   onApplyOrganize: (plan: OrganizeMove[]) => void;
   onDuplicateResult: (text: string) => void;
@@ -21,7 +22,7 @@ interface ChatMessageProps {
   actions: ChatMessageActions;
 }
 
-const RANGES: Array<{ label: string; range: OrganizeRange }> = [
+export const RANGES: Array<{ label: string; range: OrganizeRange }> = [
   { label: 'Today', range: { kind: 'today' } },
   { label: 'Yesterday', range: { kind: 'yesterday' } },
   { label: 'Last 3 days', range: { kind: 'lastDays', days: 3 } },
@@ -161,6 +162,28 @@ export function ChatMessage({ response, actions }: ChatMessageProps) {
               groups={response.groups}
               onResult={actions.onDuplicateResult}
             />
+          </div>
+        </div>
+      );
+
+    case 'folders':
+      return (
+        <div>
+          <PlainText text={response.text} />
+          <div className="dj-cards">
+            {response.folders.map((folder) => (
+              <Card key={folder.path}>
+                <div className="dj-result-card">
+                  <div className="dj-result-name">{folder.name}</div>
+                  <div className="dj-result-folder">{folder.path}</div>
+                  <Button
+                    label="Open folder"
+                    variant="secondary"
+                    onClick={() => actions.onOpenFolder(folder.path)}
+                  />
+                </div>
+              </Card>
+            ))}
           </div>
         </div>
       );

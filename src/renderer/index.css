@@ -1,6 +1,11 @@
-/* DJ v3 — renderer styles. Flat, plain, honest.
-   White background, ink text, blue accents. No gradients, no glow,
-   no decorative animation. */
+/* DJ v3.1 — renderer styles. Dark chat theme, like the Muse chat.
+   Tones are the Astryx neutral theme's dark palette (the same values
+   the Astryx components use in dark mode), plus the standing blue
+   accent #0071E3 for primary buttons and the user's own messages.
+   Dark background #1b1b1b, sidebar a touch darker #141414, DJ's
+   replies on a slightly lighter surface #262626, subtle borders
+   #303030, light text #f1f1f1, muted text #b9b9b9. Flat, no
+   gradients, no glow, no decorative animation. */
 
 html,
 body,
@@ -10,8 +15,8 @@ body,
 
 body {
   margin: 0;
-  background: #ffffff;
-  color: #1d1d1f;
+  background: #1b1b1b;
+  color: #f1f1f1;
   font-family:
     Inter,
     -apple-system,
@@ -27,80 +32,141 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #ffffff;
-  color: #1d1d1f;
+  background: #1b1b1b;
+  color: #f1f1f1;
 }
 
-/* Header */
+/* Header — menu button, DJ icon, name */
 
 .dj-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e5e5e5;
+  padding: 10px 16px;
+  border-bottom: 1px solid #303030;
+  background: #1b1b1b;
   flex-shrink: 0;
+}
+
+.dj-header-title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
 }
 
 .dj-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 700;
   line-height: 1.2;
 }
 
 .dj-subtitle {
-  font-size: 13px;
-  color: #6e6e73;
+  font-size: 12px;
+  color: #b9b9b9;
 }
 
-.dj-header-actions {
-  margin-left: auto;
+/* Slide-in sidebar */
+
+.dj-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+
+.dj-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 288px;
+  max-width: 85vw;
+  background: #141414;
+  border-right: 1px solid #303030;
+  z-index: 30;
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
   display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  gap: 20px;
+}
+
+.dj-sidebar-open {
+  transform: translateX(0);
+}
+
+.dj-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dj-sidebar-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dj-sidebar-section {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
 }
 
-/* Status bar */
+.dj-sidebar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b9b9b9;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
-.dj-statusbar {
+.dj-sidebar-buttons {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid #e5e5e5;
-  font-size: 13px;
-  color: #3a3a3c;
-  flex-shrink: 0;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
 }
 
-.dj-statusbar strong {
-  color: #1d1d1f;
+.dj-sidebar-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #b9b9b9;
+}
+
+.dj-sidebar-status strong {
+  color: #f1f1f1;
   font-weight: 600;
 }
 
+/* Stale-index notice + index progress */
+
 .dj-stale {
   padding: 8px 16px;
-  border-bottom: 1px solid #e5e5e5;
-  background: #fafafa;
+  border-bottom: 1px solid #303030;
+  background: #262626;
   font-size: 13px;
   flex-shrink: 0;
 }
 
 .dj-progress {
   padding: 8px 16px;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid #303030;
   flex-shrink: 0;
 }
 
 .dj-progress-message {
   font-size: 13px;
-  color: #3a3a3c;
+  color: #b9b9b9;
   margin: 0 0 6px;
 }
 
-/* Chat */
+/* Chat — your messages right in blue, DJ's replies left on a
+   slightly lighter surface, result cards full width. */
 
 .dj-chat {
   flex: 1;
@@ -113,20 +179,22 @@ body {
 }
 
 .dj-msg {
-  max-width: 640px;
   padding: 10px 12px;
-  border: 1px solid #e5e5e5;
-  background: #ffffff;
-  border-radius: 4px;
+  border-radius: 8px;
+  word-break: break-word;
 }
 
 .dj-msg-user {
   align-self: flex-end;
-  background: #f5f5f7;
+  max-width: 640px;
+  background: #0071e3;
+  color: #ffffff;
 }
 
 .dj-msg-dj {
-  align-self: flex-start;
+  align-self: stretch;
+  background: #262626;
+  border: 1px solid #303030;
 }
 
 .dj-text {
@@ -138,7 +206,7 @@ body {
 }
 
 .dj-text-muted {
-  color: #6e6e73;
+  color: #b9b9b9;
 }
 
 .dj-cards {
@@ -160,7 +228,7 @@ body {
 
 .dj-result-folder {
   font-size: 12px;
-  color: #6e6e73;
+  color: #b9b9b9;
   word-break: break-all;
 }
 
@@ -182,7 +250,7 @@ body {
 .dj-move {
   font-size: 13px;
   padding: 6px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #303030;
   word-break: break-all;
 }
 
@@ -199,7 +267,7 @@ body {
 
 .dj-summary-note {
   font-size: 12px;
-  color: #6e6e73;
+  color: #b9b9b9;
   margin: 8px 0 0;
 }
 
@@ -220,7 +288,7 @@ body {
   gap: 8px;
   align-items: flex-start;
   padding: 6px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #303030;
 }
 
 .dj-dup-file:last-child {
@@ -239,14 +307,15 @@ body {
 
 .dj-dup-file-folder {
   font-size: 12px;
-  color: #6e6e73;
+  color: #b9b9b9;
   word-break: break-all;
 }
 
 .dj-keep {
   font-size: 12px;
-  border: 1px solid #e5e5e5;
-  background: #f5f5f7;
+  border: 1px solid #303030;
+  background: #1b1b1b;
+  color: #b9b9b9;
   padding: 2px 6px;
   border-radius: 4px;
   white-space: nowrap;
@@ -259,13 +328,14 @@ body {
   margin-top: 10px;
 }
 
-/* Composer */
+/* Composer — pinned at the bottom */
 
 .dj-composer {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid #303030;
+  background: #1b1b1b;
   align-items: flex-end;
   flex-shrink: 0;
 }
@@ -282,10 +352,11 @@ body {
 .dj-working {
   align-self: flex-start;
   font-size: 13px;
-  color: #6e6e73;
+  color: #b9b9b9;
   padding: 10px 12px;
-  border: 1px solid #e5e5e5;
-  border-radius: 4px;
+  border: 1px solid #303030;
+  border-radius: 8px;
+  background: #262626;
 }
 
 /* Dialogs */
@@ -299,7 +370,7 @@ body {
 
 .dj-dialog-note {
   font-size: 13px;
-  color: #3a3a3c;
+  color: #b9b9b9;
   margin: 0;
 }
 
@@ -311,10 +382,18 @@ body {
 }
 
 .dj-folder-row {
-  border-bottom: 1px solid #f0f0f0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid #303030;
   padding: 4px 0;
 }
 
 .dj-folder-row:last-child {
   border-bottom: none;
+}
+
+.dj-folder-check {
+  flex: 1;
+  min-width: 0;
 }
