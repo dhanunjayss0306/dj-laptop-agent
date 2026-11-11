@@ -69,6 +69,8 @@ from the Start menu.
 2. Load the embedding model too: click the same model picker at
    the top, search for `nomic-embed-text`, pick it, and wait
    until it loads. It runs at the same time as your chat model.
+   DJ adds the required `search_query:` / `search_document:`
+   prefixes for this model by itself — you never type them.
    (If it is not in your models yet, search for it in the
    Discover tab, download it once — it is free — then load it.)
 3. Start the local server: click **Developer** on the left side,

@@ -26,6 +26,15 @@ VOCAB = ["travel", "tourism", "virun", "sapss", "sanitation", "college",
 CHAT_MODEL = "qwen3-8b"
 EMBED_MODEL = "nomic-embed-text-v1.5"
 
+# Every "input" list sent to POST /v1/embeddings, in order, so tests
+# can check what DJ actually sent the model (e.g. the task prefixes).
+RECEIVED_EMBED_INPUTS = []
+
+
+def reset_received():
+    """Clear the recorded embedding inputs (call before a test)."""
+    RECEIVED_EMBED_INPUTS.clear()
+
 
 def fake_embedding(text: str) -> list:
     """A small deterministic vector: counts of VOCAB words, normalized."""
@@ -81,6 +90,7 @@ class _Handler(BaseHTTPRequestHandler):
             inputs = data.get("input", [])
             if isinstance(inputs, str):
                 inputs = [inputs]
+            RECEIVED_EMBED_INPUTS.extend(inputs)
             self._send({
                 "object": "list",
                 "model": data.get("model", EMBED_MODEL),

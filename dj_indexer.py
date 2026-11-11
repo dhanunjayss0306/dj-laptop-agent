@@ -7,6 +7,11 @@ Two parts, working together:
      that captures what the chunk *means*), and stored locally in
      dj_data/chroma. A search for "travel and tourism" then finds files
      about travel even if those exact words are not in the file name.
+     nomic-embed-text-v1.5 was trained with task prefixes — DJ sends
+     "search_document: " in front of indexed chunks and "search_query: "
+     in front of a search query (LM Studio's server does not add them).
+     The prefixes are only sent to the model: they are never stored
+     in the database or shown in the UI.
   2. Keyword search (always available). A plain index of file names and
      file text, saved as dj_data/keyword_index.json. Used when ChromaDB
      or the embedding model is not available, so search still works.
@@ -47,6 +52,29 @@ OVERLAP_WORDS = 50
 KEYWORD_TEXT_LIMIT = 12000
 
 COLLECTION_NAME = "dj_files"
+
+# Task prefixes nomic-embed-text-v1.5 was trained with. LM Studio's
+# server does not add them, so DJ adds them when sending text to the
+# model: "search_document: " for indexed chunks, "search_query: " for
+# a search query. Without them retrieval gets worse, silently — no
+# error is raised. Only nomic-embed models get prefixes; other
+# embedding models get the raw text.
+DOC_PREFIX = "search_document: "
+QUERY_PREFIX = "search_query: "
+
+# The embedding format of the stored vectors. Bump this whenever the
+# way document texts are embedded changes, so an index built with the
+# old format is detected as stale and rebuilt instead of searched
+# with mismatched vectors.
+# Format 1: raw text, no prefixes. Format 2: nomic task prefixes.
+EMBED_FORMAT_VERSION = 2
+INDEX_META_FILENAME = "index_meta.json"
+
+
+def _uses_nomic_embed(model_id: str) -> bool:
+    """True if the embedding model id is a nomic-embed model."""
+    return re.search(r"nomic-embed", model_id or "",
+                     re.IGNORECASE) is not None
 
 
 def read_text(path: Path) -> str:
@@ -163,21 +191,31 @@ class Indexer:
             pass
         return self.embed_model
 
-    def embed_texts(self, texts: list) -> list | None:
+    def embed_texts(self, texts: list, for_query: bool = False) -> list | None:
         """Turn a list of texts into embeddings via LM Studio.
 
-        POST /v1/embeddings on the LM Studio local server. Returns a
-        list of embedding vectors, or None if the server or the
-        embedding model is not available (then search falls back to
-        keywords).
+        POST /v1/embeddings on the LM Studio local server. For a
+        nomic-embed model the texts are prefixed before sending
+        ("search_document: " for indexed documents, "search_query: "
+        for a search query — the model was trained with these task
+        prefixes). The prefixes are only sent to the model; the
+        stored texts are unchanged. Returns a list of embedding
+        vectors, or None if the server or the embedding model is not
+        available (then search falls back to keywords).
         """
         if not texts:
             return []
+        model = self._resolve_embed_model()
+        if _uses_nomic_embed(model):
+            prefix = QUERY_PREFIX if for_query else DOC_PREFIX
+            send_texts = [prefix + t for t in texts]
+        else:
+            send_texts = list(texts)
         try:
             r = requests.post(
                 self.base_url + "/embeddings",
-                json={"model": self._resolve_embed_model(),
-                      "input": texts},
+                json={"model": model,
+                      "input": send_texts},
                 timeout=120,
             )
             if r.status_code == 200:
@@ -191,7 +229,7 @@ class Indexer:
 
     def embed_query(self, query: str) -> list | None:
         """Embed one search query. Returns one vector, or None."""
-        vecs = self.embed_texts([query])
+        vecs = self.embed_texts([query], for_query=True)
         return vecs[0] if vecs else None
 
     # -- ChromaDB -------------------------------------------------------
@@ -354,12 +392,58 @@ class Indexer:
         except OSError:
             pass
 
+        # The stored vectors now match the current embedding format.
+        # If no vectors were stored, nothing may claim to be current.
+        if self.vector_ok:
+            self._write_index_meta()
+        else:
+            self._clear_index_meta()
+
         counts["seconds"] = round(time.time() - t0, 1)
         counts["vector_ok"] = self.vector_ok
         self._progress("done", total, total,
                        f"Done: {counts['files']} files, "
                        f"{counts['chunks']} chunks in {counts['seconds']}s.")
         return counts
+
+    # -- index format marker ------------------------------------------
+    def _meta_path(self) -> Path:
+        return self.data_dir / INDEX_META_FILENAME
+
+    def _read_index_meta(self) -> dict:
+        try:
+            with open(self._meta_path(), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _write_index_meta(self):
+        """Record the embedding format of the vectors just stored."""
+        try:
+            with open(self._meta_path(), "w", encoding="utf-8") as f:
+                json.dump({"embed_format": EMBED_FORMAT_VERSION,
+                           "embed_model": self._resolve_embed_model()},
+                          f, ensure_ascii=False)
+        except OSError:
+            pass
+
+    def _clear_index_meta(self):
+        try:
+            self._meta_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def index_is_stale(self) -> bool:
+        """True if an index exists but was built with an old embedding
+        format (e.g. before the nomic task prefixes were added) — its
+        vectors no longer match how new texts are embedded. No index
+        at all is not stale: that is a first run, handled by setup."""
+        has_index = bool(self.keyword_index.get("files")) or \
+            (self.data_dir / "chroma").exists()
+        if not has_index:
+            return False
+        meta = self._read_index_meta()
+        return meta.get("embed_format") != EMBED_FORMAT_VERSION
 
     def load_keyword_index(self):
         """Load the saved keyword index from disk (if the app restarted)."""

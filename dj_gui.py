@@ -197,7 +197,7 @@ class DJApp:
             return
         tag, data = value
         if tag == "startup":
-            self.lmstudio_ok, embed_ok = data
+            self.lmstudio_ok, embed_ok, stale = data
             if not self.lmstudio_ok:
                 self._say("LM Studio is not running, or no model is "
                           "loaded. Open LM Studio, load your model, click "
@@ -208,6 +208,18 @@ class DJApp:
                 self._say("LM Studio is running, but the embedding model "
                           "is not loaded. Load nomic-embed-text in LM "
                           "Studio too. Search still works by keyword.")
+                if stale:
+                    self._say("Your search index was also built with the "
+                              "old embedding format. Once the embedding "
+                              "model is loaded, click 'Rebuild index' so "
+                              "meaning search works properly.")
+            elif stale:
+                self._say("Your search index was built with the old "
+                          "embedding format. Rebuilding it now so meaning "
+                          "search works properly.")
+                self._refresh_status()
+                self._on_rebuild()
+                return
             self._refresh_status()
         elif tag == "decide":
             self._handle_action(data)
@@ -244,10 +256,12 @@ class DJApp:
             self._refresh_status()
 
     def _startup_checks(self):
-        """Background: is LM Studio up, and is the embedding model loaded?"""
+        """Background: is LM Studio up, is the embedding model loaded,
+        and was the index built with the current embedding format?"""
         ok = self.brain.refresh_models()
         embed_ok = self.brain.embedding_ready() if ok else False
-        return ("startup", (ok, embed_ok))
+        stale = self.indexer.index_is_stale()
+        return ("startup", (ok, embed_ok, stale))
 
     # -- sending a message ------------------------------------------------
     def _on_send(self):
