@@ -47,6 +47,35 @@ export const KEYWORD_TEXT_LIMIT = 12000;
 
 const EMBED_BATCH = 10;
 
+// How often progress may be sent to the window (ms). The build
+// used to send one progress message per file — thousands of IPC
+// messages and React re-renders — which helped freeze the window.
+const PROGRESS_MIN_MS = 150;
+
+// How often the build lets the main-process event loop run other
+// work (ms). Without this the build is one long stretch of
+// synchronous work and microtasks, the window stops answering
+// Windows, and the title bar says "(Not Responding)".
+const YIELD_EVERY_MS = 100;
+
+// How many directory entries the walk reads before yielding.
+const WALK_YIELD_EVERY = 200;
+
+/** Let the event loop run pending work (window messages, IPC). */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+/** Size + last-modified date of a file, for Explorer-style rows. */
+export function statMeta(filePath: string): { size?: number; mtime?: string } {
+  try {
+    const st = fs.statSync(filePath);
+    return { size: st.size, mtime: st.mtime.toISOString() };
+  } catch {
+    return {};
+  }
+}
+
 export type ProgressCallback = (p: IndexProgress) => void;
 
 export class IndexService {
@@ -57,6 +86,12 @@ export class IndexService {
 
   /** True when the vector store has usable vectors. */
   vectorOk = false;
+
+  /** Last time a progress message was sent (ms since epoch). */
+  private lastProgressAt = 0;
+
+  /** Last time the build yielded to the event loop (ms since epoch). */
+  private lastYieldAt = 0;
 
   constructor(
     private readonly dataDir: string,
@@ -115,10 +150,26 @@ export class IndexService {
   // -- walking ----------------------------------------------------------
 
   private progress(stage: IndexProgress['stage'], done: number, total: number, message: string): void {
+    // Throttled: at most one progress message per PROGRESS_MIN_MS,
+    // so the window is not flooded with thousands of IPC messages
+    // and re-renders. The final 'done' message always goes out.
+    const now = Date.now();
+    if (stage !== 'done' && now - this.lastProgressAt < PROGRESS_MIN_MS) return;
+    this.lastProgressAt = now;
     try {
       this.onProgress?.({ stage, done, total, message });
     } catch {
       // Progress display must never break the build.
+    }
+  }
+
+  /** Yield to the event loop when it has been a while, so the window
+   *  keeps answering Windows while a long job runs. */
+  private async yieldSometimes(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastYieldAt >= YIELD_EVERY_MS) {
+      this.lastYieldAt = now;
+      await yieldToEventLoop();
     }
   }
 
@@ -131,8 +182,12 @@ export class IndexService {
    * OneDrive hiccup, broken link) is skipped with a note instead of
    * stalling the whole build, and directory symlinks/junctions are
    * never followed.
+   *
+   * Async, and it yields to the event loop as it goes: the walk
+   * used to be one long synchronous stretch that froze the window
+   * ("Not Responding") on a big folder tree.
    */
-  iterFiles(folders: string[]): string[] {
+  async iterFiles(folders: string[]): Promise<string[]> {
     const found: string[] = [];
     const seen = new Set<string>();
     for (const folder of folders) {
@@ -145,7 +200,7 @@ export class IndexService {
       console.log(`DJ: scanning ${display} ...`);
       this.progress('scan', found.length, 0, `Scanning ${display}...`);
       try {
-        this.walkDir(folder, (filePath) => {
+        await this.walkDir(folder, (filePath) => {
           found.push(filePath);
           if (found.length % 200 === 0) {
             const msg = `Scanning ${display}... ${found.length} files found`;
@@ -163,12 +218,12 @@ export class IndexService {
     return found;
   }
 
-  private walkDir(
+  private async walkDir(
     dir: string,
     onFile: (filePath: string) => void,
     seen: Set<string>,
     onDir?: (dirPath: string) => void,
-  ): void {
+  ): Promise<void> {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -176,6 +231,7 @@ export class IndexService {
       console.log(`DJ: could not read a folder: ${err} (skipped)`);
       return;
     }
+    let visited = 0;
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -184,7 +240,7 @@ export class IndexService {
         if (entry.name.startsWith('.')) continue;
         if (entry.isSymbolicLink()) continue;
         onDir?.(full);
-        this.walkDir(full, onFile, seen, onDir);
+        await this.walkDir(full, onFile, seen, onDir);
       } else if (entry.isFile()) {
         if (entry.name.startsWith('.')) continue;
         if (!READABLE_EXTS.has(path.extname(entry.name).toLowerCase())) continue;
@@ -206,6 +262,10 @@ export class IndexService {
         onFile(full);
       }
       // Anything else (sockets, fifos, ...): skip.
+      visited += 1;
+      if (visited % WALK_YIELD_EVERY === 0) {
+        await yieldToEventLoop();
+      }
     }
   }
 
@@ -216,8 +276,9 @@ export class IndexService {
    * a folder ("open the frontend folder"). Same skip rules as files:
    * junk and hidden folders are never recorded. The roots themselves
    * count too (so "open AuPro" works when AuPro is an indexed folder).
+   * Async, yields as it walks, like iterFiles.
    */
-  iterFolders(folders: string[]): IndexedFolder[] {
+  async iterFolders(folders: string[]): Promise<IndexedFolder[]> {
     const found: IndexedFolder[] = [];
     const seen = new Set<string>();
     const record = (dirPath: string): void => {
@@ -239,7 +300,7 @@ export class IndexService {
       if (!isDirectory(folder)) continue;
       record(folder);
       try {
-        this.walkDir(
+        await this.walkDir(
           folder,
           () => {},
           new Set<string>(),
@@ -267,8 +328,10 @@ export class IndexService {
       vectorOk: false,
     };
     const t0 = Date.now();
+    this.lastProgressAt = 0;
+    this.lastYieldAt = Date.now();
     this.progress('scan', 0, 1, 'Looking through your folders...');
-    const files = this.iterFiles(folders);
+    const files = await this.iterFiles(folders);
     const total = Math.max(files.length, 1);
 
     // Fresh vector store for this build; the old one is replaced
@@ -310,6 +373,10 @@ export class IndexService {
       const filePath = files[i];
       const name = path.basename(filePath);
       this.progress('read', i + 1, total, `Reading ${name}`);
+      // Let the window answer while a long build runs — without
+      // this the per-file loop is one unbroken stretch of work and
+      // Windows flags the window "(Not Responding)".
+      await this.yieldSometimes();
       let text = '';
       try {
         text = await readText(filePath);
@@ -351,7 +418,7 @@ export class IndexService {
     await flushBatch();
 
     // Save the keyword index, with the folder list beside it.
-    const foldersFound = this.iterFolders(folders);
+    const foldersFound = await this.iterFolders(folders);
     counts.folders = foldersFound.length;
     this.keywordFiles = keywordFiles;
     this.keywordFolders = foldersFound;
@@ -407,6 +474,7 @@ export class IndexService {
         folder: hit.folder,
         snippet: hit.text.replace(/\s+/g, ' ').trim().slice(0, 160),
         score: hit.score,
+        ...statMeta(hit.path),
       });
       if (seen.size >= topN) break;
     }
@@ -440,6 +508,7 @@ export class IndexService {
       folder: entry.folder,
       snippet: snippet(entry.text, query),
       score,
+      ...statMeta(entry.path),
     }));
   }
 
@@ -449,16 +518,19 @@ export class IndexService {
   }
 
   /** All indexed files, newest first (for "list recent files"). */
-  listRecent(topN = 10): { path: string; name: string; folder: string; mtime: number }[] {
-    const rows: { path: string; name: string; folder: string; mtime: number }[] = [];
+  listRecent(topN = 10): { path: string; name: string; folder: string; mtime: number; size?: number }[] {
+    const rows: { path: string; name: string; folder: string; mtime: number; size?: number }[] = [];
     for (const entry of this.keywordFiles) {
       let mtime = 0;
+      let size: number | undefined;
       try {
-        mtime = fs.statSync(entry.path).mtimeMs;
+        const st = fs.statSync(entry.path);
+        mtime = st.mtimeMs;
+        size = st.size;
       } catch {
         continue;
       }
-      rows.push({ path: entry.path, name: entry.name, folder: entry.folder, mtime });
+      rows.push({ path: entry.path, name: entry.name, folder: entry.folder, mtime, size });
     }
     rows.sort((a, b) => b.mtime - a.mtime);
     return rows.slice(0, topN);

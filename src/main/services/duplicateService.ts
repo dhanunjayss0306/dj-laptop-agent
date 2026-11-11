@@ -29,12 +29,18 @@ interface FoundFile {
 }
 
 export class DuplicateService {
-  /** Find extra copies in the given folders. Biggest waste first. */
-  find(folders: string[]): DuplicateGroup[] {
+  /**
+   * Find extra copies in the given folders. Biggest waste first.
+   * Async, and it yields to the event loop as it walks and hashes:
+   * the scan used to be one long synchronous stretch that froze the
+   * window ("Not Responding") on a big folder tree.
+   */
+  async find(folders: string[]): Promise<DuplicateGroup[]> {
     const bySize = new Map<number, string[]>();
+    let walked = 0;
     for (const folder of folders) {
       if (!isDirectory(folder)) continue;
-      this.walk(folder, (filePath) => {
+      await this.walk(folder, (filePath) => {
         let size = 0;
         try {
           size = fs.statSync(filePath).size;
@@ -46,8 +52,13 @@ export class DuplicateService {
         list.push(filePath);
         bySize.set(size, list);
       });
+      walked += 1;
+      if (walked % 10 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
     }
     const groups: DuplicateGroup[] = [];
+    let hashed = 0;
     for (const [size, paths] of bySize) {
       if (paths.length < 2) continue;
       const byHash = new Map<string, string[]>();
@@ -57,6 +68,10 @@ export class DuplicateService {
         const list = byHash.get(digest) ?? [];
         list.push(p);
         byHash.set(digest, list);
+        hashed += 1;
+        if (hashed % 10 === 0) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
       }
       for (const dupPaths of byHash.values()) {
         if (dupPaths.length < 2) continue;
@@ -84,24 +99,29 @@ export class DuplicateService {
     return groups;
   }
 
-  private walk(dir: string, onFile: (filePath: string) => void): void {
+  private async walk(dir: string, onFile: (filePath: string) => void): Promise<void> {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
+    let visited = 0;
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
         if (entry.name.startsWith('.')) continue;
         if (entry.isSymbolicLink()) continue;
-        this.walk(full, onFile);
+        await this.walk(full, onFile);
       } else if (entry.isFile()) {
         if (entry.name.startsWith('.')) continue;
         if (ORGANIZER_SKIP.has(entry.name.toLowerCase())) continue;
         onFile(full);
+      }
+      visited += 1;
+      if (visited % 200 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
     }
   }

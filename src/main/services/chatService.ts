@@ -147,7 +147,7 @@ export class ChatService {
       }
 
       case 'duplicates': {
-        const groups = this.duplicates.find(this.getFolders());
+        const groups = await this.duplicates.find(this.getFolders());
         if (groups.length === 0) {
           return { kind: 'message', text: 'I found no extra copies in your folders.' };
         }
@@ -179,6 +179,8 @@ export class ChatService {
             folder: r.folder,
             snippet: '',
             score: 0,
+            size: r.size,
+            mtime: new Date(r.mtime).toISOString(),
           })),
         };
       }

@@ -11,15 +11,10 @@ import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import { TextInput } from '@astryxdesign/core/TextInput';
 
 import type { DuplicateGroup } from '../../shared/types';
+import { formatBytes, getFileKind } from '../utils/fileTypes';
+import { FileTypeIcon } from './FileRow';
 
 const MERGE_TARGET_DEFAULT = 'C:\\Users\\dhanu\\Downloads\\Merged';
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 interface GroupCardProps {
   group: DuplicateGroup;
@@ -115,27 +110,43 @@ function GroupCard({ group, onResult, onGroupsChanged }: GroupCardProps) {
 
         <div>
           {keeper && (
-            <div className="dj-dup-file" key={keeper.path}>
-              <div className="dj-dup-file-info">
-                <div className="dj-dup-file-name">{keeper.name}</div>
-                <div className="dj-dup-file-folder">
+            <div className="dj-file-row" key={keeper.path}>
+              <span className="dj-file-icon">
+                <FileTypeIcon kind={getFileKind(keeper.name)} label={keeper.name} />
+              </span>
+              <div className="dj-file-main">
+                <div className="dj-file-name">{keeper.name}</div>
+                <div className="dj-file-path">
                   {keeper.folder}
                   {keeper.mtime ? ` — ${keeper.mtime}` : ''}
                 </div>
+              </div>
+              <div className="dj-file-meta">
+                <span>{group.sizeText}</span>
               </div>
               <span className="dj-keep">keep</span>
             </div>
           )}
           {copies.map((file) => (
-            <div className="dj-dup-file" key={file.path}>
-              <div className="dj-dup-file-info">
-                <CheckboxInput
-                  label={file.name}
-                  description={`${file.folder}${file.mtime ? ` — ${file.mtime}` : ''}`}
-                  value={selected.has(file.path)}
-                  onChange={(checked) => toggle(file.path, checked)}
-                />
+            <div className="dj-file-row" key={file.path}>
+              <span className="dj-file-icon">
+                <FileTypeIcon kind={getFileKind(file.name)} label={file.name} />
+              </span>
+              <div className="dj-file-main">
+                <div className="dj-file-name">{file.name}</div>
+                <div className="dj-file-path">
+                  {file.folder}
+                  {file.mtime ? ` — ${file.mtime}` : ''}
+                </div>
               </div>
+              <div className="dj-file-meta">
+                <span>{group.sizeText}</span>
+              </div>
+              <CheckboxInput
+                label="Delete"
+                value={selected.has(file.path)}
+                onChange={(checked) => toggle(file.path, checked)}
+              />
             </div>
           ))}
         </div>

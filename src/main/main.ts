@@ -3,7 +3,7 @@
 // server, nothing leaves the laptop.
 
 import * as path from 'path';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu } from 'electron';
 
 import { ConfigRepository } from './config';
 import { registerIpc } from './ipc/ipcControllers';
@@ -57,6 +57,11 @@ function createWindow(): BrowserWindow {
 
 async function main(): Promise<void> {
   await app.whenReady();
+
+  // DJ has no use for Electron's default File / Edit / View /
+  // Window / Help menu bar — a clean chat app has no menu at all.
+  // DevTools is still available with Ctrl+Shift+I.
+  Menu.setApplicationMenu(null);
 
   const dataDir = getDataDir();
   const configRepo = new ConfigRepository(dataDir);

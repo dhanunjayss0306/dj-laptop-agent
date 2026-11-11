@@ -50,7 +50,7 @@ describe('countOccurrences', () => {
 });
 
 describe('iterFiles: pruning', () => {
-  it('never walks junk folders or hidden folders', () => {
+  it('never walks junk folders or hidden folders', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dj-walk-'));
     const files: Record<string, string> = {
       'real.txt': 'x',
@@ -68,12 +68,12 @@ describe('iterFiles: pruning', () => {
       fs.writeFileSync(p, content);
     }
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
-    const found = indexer.iterFiles([root]).map((p) => path.relative(root, p));
+    const found = (await indexer.iterFiles([root])).map((p) => path.relative(root, p));
     expect(found.sort()).toEqual(['real.txt', 'sub/real2.txt']);
   });
-  it('a missing folder is skipped, not crashed on', () => {
+  it('a missing folder is skipped, not crashed on', async () => {
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
-    expect(indexer.iterFiles(['/does/not/exist/xyz'])).toEqual([]);
+    expect(await indexer.iterFiles(['/does/not/exist/xyz'])).toEqual([]);
   });
 });
 
@@ -138,7 +138,7 @@ describe('build: keyword-only when embeddings are unavailable', () => {
 });
 
 describe('iterFolders: folders by name, same skip rules as files', () => {
-  it('records directories, skips junk and hidden folders, includes the root', () => {
+  it('records directories, skips junk and hidden folders, includes the root', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dj-fold-'));
     for (const dir of [
       'frontend',
@@ -152,15 +152,14 @@ describe('iterFolders: folders by name, same skip rules as files', () => {
     }
     fs.writeFileSync(path.join(root, 'frontend/index.html'), '<html></html>');
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
-    const found = indexer
-      .iterFolders([root])
+    const found = (await indexer.iterFolders([root]))
       .map((f) => path.relative(root, f.path))
       .sort();
     expect(found).toEqual(['', 'backend', 'frontend', 'frontend/components']);
   });
-  it('a missing folder gives an empty list', () => {
+  it('a missing folder gives an empty list', async () => {
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
-    expect(indexer.iterFolders(['/does/not/exist/xyz'])).toEqual([]);
+    expect(await indexer.iterFolders(['/does/not/exist/xyz'])).toEqual([]);
   });
 });
 

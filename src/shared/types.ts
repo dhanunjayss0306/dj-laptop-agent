@@ -17,6 +17,10 @@ export interface SearchResult {
   folder: string;
   snippet: string;
   score: number;
+  /** File size in bytes (Explorer row, right side) — when known. */
+  size?: number;
+  /** Last-modified date as an ISO string — when known. */
+  mtime?: string;
 }
 
 /** A folder DJ knows about (recorded at index time, by name). */

@@ -187,7 +187,10 @@ body {
 .dj-msg-user {
   align-self: flex-end;
   max-width: 640px;
-  background: #0071e3;
+  /* Darker than the standing #0071E3 on purpose: white text on
+     #0071E3 is 4.5:1 at best (borderline unreadable); on #0066cc
+     it is 5.6:1, comfortably readable. */
+  background: #0066cc;
   color: #ffffff;
 }
 
@@ -216,27 +219,73 @@ body {
   margin-top: 10px;
 }
 
-.dj-result-card {
-  padding: 10px 12px;
+/* Explorer-style file rows — one file per row, the way Windows
+   File Explorer shows it: file-type icon on the left, file name in
+   clear light text, folder path underneath in dimmer text, size and
+   date on the right. Dark Explorer tone: rows sit on #202020,
+   hover #2e2e2e, thin separators #303030. Every text colour is
+   checked against its background (name #f1f1f1, path #b9b9b9,
+   size/date #9a9a9a — all readable on the dark rows). */
+
+.dj-file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: #202020;
+  border: 1px solid #303030;
+  border-radius: 6px;
 }
 
-.dj-result-name {
+.dj-file-row + .dj-file-row {
+  margin-top: 6px;
+}
+
+.dj-file-row:hover {
+  background: #2e2e2e;
+}
+
+.dj-file-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.dj-file-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.dj-file-name {
   font-size: 14px;
   font-weight: 600;
+  color: #f1f1f1;
   word-break: break-all;
 }
 
-.dj-result-folder {
+.dj-file-path {
   font-size: 12px;
   color: #b9b9b9;
   word-break: break-all;
 }
 
-.dj-result-snippet {
+.dj-file-snippet {
   font-size: 13px;
-  margin: 6px 0 8px;
+  color: #d6d6d6;
+  margin-top: 4px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.dj-file-meta {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  color: #9a9a9a;
+  white-space: nowrap;
 }
 
 .dj-row {
@@ -245,30 +294,6 @@ body {
   flex-wrap: wrap;
   align-items: center;
   margin-top: 10px;
-}
-
-.dj-move {
-  font-size: 13px;
-  padding: 6px 0;
-  border-bottom: 1px solid #303030;
-  word-break: break-all;
-}
-
-.dj-move:last-child {
-  border-bottom: none;
-}
-
-.dj-summary-file {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 8px 0 4px;
-  word-break: break-all;
-}
-
-.dj-summary-note {
-  font-size: 12px;
-  color: #b9b9b9;
-  margin: 8px 0 0;
 }
 
 /* Duplicates */
@@ -283,32 +308,17 @@ body {
   word-break: break-all;
 }
 
-.dj-dup-file {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 6px 0;
-  border-bottom: 1px solid #303030;
-}
-
-.dj-dup-file:last-child {
-  border-bottom: none;
-}
-
-.dj-dup-file-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.dj-dup-file-name {
+.dj-summary-file {
   font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 4px;
   word-break: break-all;
 }
 
-.dj-dup-file-folder {
+.dj-summary-note {
   font-size: 12px;
   color: #b9b9b9;
-  word-break: break-all;
+  margin: 8px 0 0;
 }
 
 .dj-keep {

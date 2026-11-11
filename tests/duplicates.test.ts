@@ -21,44 +21,44 @@ function makeTree(files: Record<string, string>): string {
 }
 
 describe('find: size then content hash', () => {
-  it('groups files with identical content', () => {
+  it('groups files with identical content', async () => {
     const dir = makeTree({
       'a.txt': 'same content here',
       'sub/b.txt': 'same content here',
       'c.txt': 'different content!',
     });
-    const groups = service.find([dir]);
+    const groups = await service.find([dir]);
     expect(groups.length).toBe(1);
     expect(groups[0].files.map((f) => f.name).sort()).toEqual(['a.txt', 'b.txt']);
     expect(groups[0].wasted).toBe('same content here'.length);
   });
-  it('same size but different content is NOT a duplicate', () => {
+  it('same size but different content is NOT a duplicate', async () => {
     const dir = makeTree({ 'a.txt': 'abc', 'b.txt': 'xyz' });
-    expect(service.find([dir])).toEqual([]);
+    expect(await service.find([dir])).toEqual([]);
   });
-  it('empty files are skipped', () => {
+  it('empty files are skipped', async () => {
     const dir = makeTree({ 'a.txt': '', 'b.txt': '' });
-    expect(service.find([dir])).toEqual([]);
+    expect(await service.find([dir])).toEqual([]);
   });
-  it('biggest waste first', () => {
+  it('biggest waste first', async () => {
     const dir = makeTree({
       'small1.txt': 'x'.repeat(10),
       'small2.txt': 'x'.repeat(10),
       'big1.txt': 'y'.repeat(100),
       'big2.txt': 'y'.repeat(100),
     });
-    const groups = service.find([dir]);
+    const groups = await service.find([dir]);
     expect(groups.length).toBe(2);
     expect(groups[0].size).toBe(100);
     expect(groups[1].size).toBe(10);
   });
-  it('junk folders are not walked', () => {
+  it('junk folders are not walked', async () => {
     const dir = makeTree({
       'a.txt': 'dup content',
       'node_modules/b.txt': 'dup content',
       '.git/c.txt': 'dup content',
     });
-    const groups = service.find([dir]);
+    const groups = await service.find([dir]);
     expect(groups).toEqual([]);
   });
 });

@@ -4,9 +4,10 @@
 
 import { useState } from 'react';
 import { Button } from '@astryxdesign/core/Button';
-import { Card } from '@astryxdesign/core/Card';
 
 import type { ChatResponse, OrganizeMove, OrganizeRange } from '../../shared/types';
+import { formatBytes, formatDate, getFileKind } from '../utils/fileTypes';
+import { FileRow } from './FileRow';
 import { DuplicatesBlock } from './DuplicateGroupCard';
 
 export interface ChatMessageActions {
@@ -51,20 +52,17 @@ export function ChatMessage({ response, actions }: ChatMessageProps) {
           <PlainText text={response.text} />
           <div className="dj-cards">
             {response.results.map((result) => (
-              <Card key={result.path}>
-                <div className="dj-result-card">
-                  <div className="dj-result-name">{result.name}</div>
-                  <div className="dj-result-folder">{result.folder}</div>
-                  {result.snippet ? (
-                    <p className="dj-result-snippet">{result.snippet}</p>
-                  ) : null}
-                  <Button
-                    label="Open"
-                    variant="secondary"
-                    onClick={() => actions.onOpenFile(result.path)}
-                  />
-                </div>
-              </Card>
+              <FileRow
+                key={result.path}
+                kind={getFileKind(result.name)}
+                name={result.name}
+                folder={result.folder}
+                sizeText={result.size !== undefined ? formatBytes(result.size) : undefined}
+                dateText={result.mtime ? formatDate(result.mtime) : undefined}
+                snippet={result.snippet || undefined}
+                actionLabel="Open"
+                onAction={() => actions.onOpenFile(result.path)}
+              />
             ))}
           </div>
         </div>
@@ -108,11 +106,12 @@ export function ChatMessage({ response, actions }: ChatMessageProps) {
           <PlainText text={response.text} />
           <div className="dj-cards">
             {shown.map((move) => (
-              <div className="dj-move" key={move.old}>
-                {move.name}
-                <br />
-                {move.old} {'->'} {move.new}
-              </div>
+              <FileRow
+                key={move.old}
+                kind={getFileKind(move.name)}
+                name={move.name}
+                folder={`${move.old} → ${move.new}`}
+              />
             ))}
             {rest > 0 ? (
               <p className="dj-text dj-text-muted">and {rest} more</p>
@@ -172,17 +171,14 @@ export function ChatMessage({ response, actions }: ChatMessageProps) {
           <PlainText text={response.text} />
           <div className="dj-cards">
             {response.folders.map((folder) => (
-              <Card key={folder.path}>
-                <div className="dj-result-card">
-                  <div className="dj-result-name">{folder.name}</div>
-                  <div className="dj-result-folder">{folder.path}</div>
-                  <Button
-                    label="Open folder"
-                    variant="secondary"
-                    onClick={() => actions.onOpenFolder(folder.path)}
-                  />
-                </div>
-              </Card>
+              <FileRow
+                key={folder.path}
+                kind="folder"
+                name={folder.name}
+                folder={folder.path}
+                actionLabel="Open folder"
+                onAction={() => actions.onOpenFolder(folder.path)}
+              />
             ))}
           </div>
         </div>
