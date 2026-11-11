@@ -12,21 +12,31 @@
 // model; the stored texts are unchanged. Without them retrieval gets
 // worse, silently — no error is raised.
 
-import type { EmbedRequest, EmbedResponse } from '../../shared/types';
+import type { EmbedRequest, EmbedResponse, EmbedderSource } from '../../shared/types';
+import { EMBED_MODEL_ID } from '../../shared/modelSource';
 
-export const EMBED_MODEL_ID = 'Xenova/nomic-embed-text-v1.5';
+export { EMBED_MODEL_ID };
 export const EMBED_DIM = 768;
 
 export const DOC_PREFIX = 'search_document: ';
 export const QUERY_PREFIX = 'search_query: ';
 
-const EMBED_TIMEOUT_MS = 120_000;
+// How long the renderer may take to load the tiny model and embed
+// the first text before an index build gives up on meaning search
+// and falls back to keyword search. 5 minutes: the first load
+// compiles a 137 MB model in WASM, which is slow on a weak machine
+// (the v3.3 smoke test watched a 120 s cap expire on this VM),
+// and it only happens once per app start — after that the model
+// stays loaded in memory.
+const EMBED_TIMEOUT_MS = 300_000;
 
 export type EmbedderState = 'ready' | 'loading' | 'unavailable' | 'not-started';
 
 export class EmbedderClient {
   /** 'not-started' until the first embed is attempted. */
   state: EmbedderState = 'not-started';
+  /** Where the running model came from — 'none' until one loads. */
+  source: EmbedderSource = 'none';
 
   private readonly sendRequest: (req: EmbedRequest) => boolean;
   private readonly pending = new Map<
@@ -66,6 +76,13 @@ export class EmbedderClient {
     if (state === 'loading') this.state = 'loading';
     else if (state === 'ready') this.state = 'ready';
     else if (state === 'unavailable') this.state = 'unavailable';
+  }
+
+  /** Called by the IPC layer when the renderer reports its model source. */
+  onRendererSource(source: string): void {
+    if (source === 'bundled' || source === 'downloaded' || source === 'none') {
+      this.source = source;
+    }
   }
 
   /** Embed texts. Returns vectors, or null when unavailable. */

@@ -153,6 +153,14 @@ body {
   flex-shrink: 0;
 }
 
+.dj-update {
+  padding: 8px 16px;
+  border-bottom: 1px solid #0066cc;
+  background: #0f2a44;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
 .dj-progress {
   padding: 8px 16px;
   border-bottom: 1px solid #303030;

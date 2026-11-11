@@ -71,6 +71,23 @@ describe('fallback: when the renderer cannot embed', () => {
   });
 });
 
+describe('model source: where the running model came from', () => {
+  it('starts as none, tracks what the renderer reports', () => {
+    const { client } = makeClient();
+    expect(client.source).toBe('none');
+    client.onRendererSource('bundled');
+    expect(client.source).toBe('bundled');
+    client.onRendererSource('downloaded');
+    expect(client.source).toBe('downloaded');
+  });
+  it('ignores a source value it does not know', () => {
+    const { client } = makeClient();
+    client.onRendererSource('bundled');
+    client.onRendererSource('from-the-moon');
+    expect(client.source).toBe('bundled');
+  });
+});
+
 describe('state', () => {
   it('starts as not-started, becomes ready on a good answer', async () => {
     const { client } = makeClient((req) => {

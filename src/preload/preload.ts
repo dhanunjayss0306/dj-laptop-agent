@@ -5,7 +5,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 import { IPC, type DjApi } from '../shared/ipc';
-import type { EmbedRequest, EmbedResponse, IndexProgress } from '../shared/types';
+import type {
+  EmbedRequest,
+  EmbedResponse,
+  IndexProgress,
+  UpdateState,
+} from '../shared/types';
 
 const api: DjApi = {
   getStatus: () => ipcRenderer.invoke(IPC.getStatus),
@@ -47,6 +52,18 @@ const api: DjApi = {
 
   sendEmbedderState: (state: string) => {
     ipcRenderer.send(IPC.embedderState, state);
+  },
+
+  sendEmbedderSource: (source: string) => {
+    ipcRenderer.send(IPC.embedderSource, source);
+  },
+
+  onUpdateStatus: (cb) => {
+    const listener = (_e: IpcRendererEvent, s: UpdateState): void => cb(s);
+    ipcRenderer.on(IPC.updateStatus, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.updateStatus, listener);
+    };
   },
 };
 

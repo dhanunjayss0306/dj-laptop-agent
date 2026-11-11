@@ -11,11 +11,21 @@ import { EmbedderClient } from './services/embedderClient';
 import { IndexService } from './services/indexService';
 import { ChatService } from './services/chatService';
 import { DuplicateService } from './services/duplicateService';
+import {
+  getBundledModelsDir,
+  registerModelProtocol,
+  registerModelSchemePrivileges,
+} from './services/modelProtocol';
+import { UpdateService } from './services/updateService';
 import { getDataDir } from './utils/paths';
 import { IPC } from '../shared/ipc';
-import type { EmbedRequest } from '../shared/types';
+import type { EmbedRequest, UpdateState } from '../shared/types';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+// The bundled model is served on a private scheme — privileges must
+// be registered before the app is ready.
+registerModelSchemePrivileges();
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -63,6 +73,11 @@ async function main(): Promise<void> {
   // DevTools is still available with Ctrl+Shift+I.
   Menu.setApplicationMenu(null);
 
+  // Serve the bundled embedding model to the renderer (dj-model://).
+  // A missing file answers 404 and the renderer falls back to a
+  // Hugging Face download instead.
+  registerModelProtocol(getBundledModelsDir());
+
   const dataDir = getDataDir();
   const configRepo = new ConfigRepository(dataDir);
 
@@ -98,6 +113,18 @@ async function main(): Promise<void> {
   });
 
   mainWindow = createWindow();
+
+  // Self-update from GitHub Releases (installed app only — in dev
+  // the service stays idle). Checks on startup and once a day,
+  // downloads in the background, installs when DJ quits. Never
+  // restarts the app by itself; the UI shows the update state.
+  const updater = new UpdateService((s: UpdateState) => {
+    const win = mainWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC.updateStatus, s);
+    }
+  });
+  void updater.start(app.isPackaged);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -20,10 +20,11 @@ import type {
   IndexProgress,
   OrganizeMove,
   OrganizeRange,
+  UpdateState,
 } from '../shared/types';
 import { ChatMessage, RANGES } from './components/ChatMessage';
 import { FoldersDialog } from './components/FoldersDialog';
-import { getEmbedderState, reportEmbedderState } from './embedder';
+import { getEmbedderSource, getEmbedderState, reportEmbedderState } from './embedder';
 
 interface DjMessage {
   id: number;
@@ -53,6 +54,7 @@ export default function App() {
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [foldersFirstRun, setFoldersFirstRun] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [update, setUpdate] = useState<UpdateState | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const pushDj = useCallback((response: ChatResponse) => {
@@ -74,14 +76,17 @@ export default function App() {
     }
   }, []);
 
-  // Startup: subscribe to index progress, load status/config, and
-  // open setup on first run (no index yet).
+  // Startup: subscribe to index progress and update status, load
+  // status/config, and open setup on first run (no index yet).
   useEffect(() => {
-    const unsubscribe = window.dj.onIndexProgress((p) => {
+    const unsubscribeProgress = window.dj.onIndexProgress((p) => {
       setProgress(p);
       if (p.stage === 'done') {
         setBuilding(false);
       }
+    });
+    const unsubscribeUpdate = window.dj.onUpdateStatus((s) => {
+      setUpdate(s);
     });
     void (async () => {
       const s = await refreshStatus();
@@ -90,7 +95,10 @@ export default function App() {
         setFoldersOpen(true);
       }
     })();
-    return unsubscribe;
+    return () => {
+      unsubscribeProgress();
+      unsubscribeUpdate();
+    };
   }, [refreshStatus]);
 
   // Keep the newest message visible.
@@ -218,6 +226,7 @@ export default function App() {
   }, []);
 
   const embedderState = status?.embedderState ?? getEmbedderState();
+  const embedderSource = status?.embedderSource ?? getEmbedderSource();
   const searchMode =
     status == null
       ? 'loading status…'
@@ -226,7 +235,11 @@ export default function App() {
         : 'keyword search only';
   const embedderLabel =
     embedderState === 'ready'
-      ? 'embedder ready'
+      ? embedderSource === 'bundled'
+        ? 'embedder ready (bundled model)'
+        : embedderSource === 'downloaded'
+          ? 'embedder ready (downloaded model)'
+          : 'embedder ready'
       : embedderState === 'loading'
         ? 'embedder loading'
         : embedderState === 'unavailable'
@@ -285,6 +298,7 @@ export default function App() {
             </div>
             <div>{searchMode}</div>
             <div>{embedderLabel}</div>
+            {update && update.status !== 'idle' ? <div>{update.message}</div> : null}
           </div>
         </div>
 
@@ -323,6 +337,10 @@ export default function App() {
           The search index was built with an older format — Rebuild index to use meaning
           search.
         </div>
+      ) : null}
+
+      {update?.status === 'ready' ? (
+        <div className="dj-update">{update.message}</div>
       ) : null}
 
       {(building || (progress && progress.stage !== 'done')) && (

@@ -52,6 +52,7 @@ export function registerIpc(ctx: ControllerContext): void {
       foldersIndexed,
       vectorOk,
       embedderState: embedder.state,
+      embedderSource: embedder.source,
       hasIndex: indexer.hasIndex(),
       indexStale: indexer.indexIsStale(),
       config,
@@ -156,5 +157,9 @@ export function registerIpc(ctx: ControllerContext): void {
 
   ipcMain.on(IPC.embedderState, (_e, state: string) => {
     embedder.onRendererState(state);
+  });
+
+  ipcMain.on(IPC.embedderSource, (_e, source: string) => {
+    embedder.onRendererSource(source);
   });
 }

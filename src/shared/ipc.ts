@@ -15,6 +15,7 @@ import type {
   OrganizeMove,
   OrganizeRange,
   SearchResult,
+  UpdateState,
 } from './types';
 
 /** All channels, both directions. Invoke = request/response,
@@ -45,6 +46,10 @@ export const IPC = {
   embedResponse: 'dj:embed-response',
   /** Renderer -> main: the renderer reports embedder state changes. */
   embedderState: 'dj:embedder-state',
+  /** Renderer -> main: the renderer reports where its model came from. */
+  embedderSource: 'dj:embedder-source',
+  /** Main -> renderer: auto-update progress (checking / ready / error). */
+  updateStatus: 'dj:update-status',
 } as const;
 
 /** The typed API the preload script exposes as window.dj. */
@@ -85,6 +90,10 @@ export interface DjApi {
   sendEmbedResponse(resp: EmbedResponse): void;
   /** Report the renderer embedder's state to main. */
   sendEmbedderState(state: string): void;
+  /** Report where the renderer embedder's model came from. */
+  sendEmbedderSource(source: string): void;
+  /** Auto-update progress from main. Returns an unsubscribe function. */
+  onUpdateStatus(cb: (s: UpdateState) => void): () => void;
 }
 
 declare global {

@@ -37,6 +37,30 @@ export type EmbedderState =
   | 'unavailable' // embeddings failed; keyword search only
   | 'not-started'; // no index built yet
 
+/** Where the embedding model that is actually running came from. */
+export type EmbedderSource =
+  | 'bundled' // shipped inside the installed app — no download
+  | 'downloaded' // fetched from the Hugging Face hub on first run
+  | 'none'; // no model loaded yet (or it failed)
+
+/** Auto-update state, pushed from the main process to the UI. */
+export type UpdateStatus =
+  | 'idle' // no check running (or updates off in dev)
+  | 'checking' // asking GitHub Releases for a newer version
+  | 'available' // a newer version exists; downloading it now
+  | 'downloading' // the update file is downloading
+  | 'ready' // downloaded — restart DJ to install it
+  | 'up-to-date' // already on the newest version
+  | 'error'; // the check failed; DJ keeps working as-is
+
+export interface UpdateState {
+  status: UpdateStatus;
+  /** Plain text for the user, e.g. "Update ready — restart DJ to install". */
+  message: string;
+  /** The newer version number, when one was found. */
+  version?: string;
+}
+
 export interface DjStatus {
   /** Files in the keyword index. */
   filesIndexed: number;
@@ -46,6 +70,8 @@ export interface DjStatus {
   vectorOk: boolean;
   /** The tiny embedding model's state. */
   embedderState: EmbedderState;
+  /** Where the running embedding model came from (bundled / downloaded / none). */
+  embedderSource: EmbedderSource;
   /** True when any index exists at all. */
   hasIndex: boolean;
   /** True when an index exists but was built with an old format. */
