@@ -90,11 +90,11 @@
     "dev:renderer": "vite",
     "pack": "npm run build && electron-builder --win --x64",
     "pack:dir": "npm run build && electron-builder --dir",
-    "pack:msix": "npm run build && electron-builder --win appx --x64",
+    "pack:msix": "npm run build && electron-builder --win appx --x64 --publish never",
     "start": "npm run build && electron .",
     "test": "vitest run",
     "test:watch": "vitest",
     "prebuild": "node scripts/copy-ort.mjs"
   },
-  "version": "3.3.0"
+  "version": "3.4.0"
 }
