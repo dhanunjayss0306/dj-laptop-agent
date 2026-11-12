@@ -19,6 +19,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,9 +60,10 @@ async function download(file, expectedSize) {
   }
   const tmp = `${dest}.tmp`;
   const out = fs.createWriteStream(tmp);
+  // Node's global fetch gives a WHATWG stream, which has no .pipe().
+  // Convert it to a Node stream first.
   await new Promise((resolve, reject) => {
-    res.body.pipe(out);
-    res.body.on('error', reject);
+    Readable.fromWeb(res.body).pipe(out);
     out.on('finish', resolve);
     out.on('error', reject);
   });
