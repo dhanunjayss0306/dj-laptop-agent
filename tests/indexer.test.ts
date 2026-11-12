@@ -68,7 +68,10 @@ describe('iterFiles: pruning', () => {
       fs.writeFileSync(p, content);
     }
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
-    const found = (await indexer.iterFiles([root])).map((p) => path.relative(root, p));
+    // path.relative uses backslashes on Windows; normalize so the
+    // expectation reads the same on every platform.
+    const toPosix = (p: string) => p.split(path.sep).join('/');
+    const found = (await indexer.iterFiles([root])).map((p) => toPosix(path.relative(root, p)));
     expect(found.sort()).toEqual(['real.txt', 'sub/real2.txt']);
   });
   it('a missing folder is skipped, not crashed on', async () => {
@@ -153,7 +156,7 @@ describe('iterFolders: folders by name, same skip rules as files', () => {
     fs.writeFileSync(path.join(root, 'frontend/index.html'), '<html></html>');
     const indexer = makeIndexer(fs.mkdtempSync(path.join(os.tmpdir(), 'dj-data-')));
     const found = (await indexer.iterFolders([root]))
-      .map((f) => path.relative(root, f.path))
+      .map((f) => path.relative(root, f.path).split(path.sep).join('/'))
       .sort();
     expect(found).toEqual(['', 'backend', 'frontend', 'frontend/components']);
   });
