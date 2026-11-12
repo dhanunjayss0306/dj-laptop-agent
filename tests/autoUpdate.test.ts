@@ -113,6 +113,6 @@ describe('package.json: the updater config the build ships', () => {
       repo: 'dj-laptop-agent',
     });
     expect(pkg.build.extraResources).toContainEqual({ from: 'resources/models', to: 'models' });
-    expect(pkg.version).toBe('3.3.0');
+    expect(pkg.version).toBe('3.4.0');
   });
 });
