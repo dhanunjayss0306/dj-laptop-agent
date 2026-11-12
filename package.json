@@ -4,10 +4,10 @@
     "appx": {
       "applicationId": "Dhanunjay.DJ",
       "backgroundColor": "#1b1b1b",
-      "displayName": "DJ",
-      "identityName": "REPLACE-WITH-RESERVED-PACKAGE-NAME",
-      "publisher": "CN=REPLACE-WITH-RESERVED-PUBLISHER-ID",
-      "publisherDisplayName": "REPLACE-WITH-PUBLISHER-DISPLAY-NAME",
+      "displayName": "DJfiles",
+      "identityName": "DJservices.DJfiles",
+      "publisher": "CN=13C47F1C-0CDA-434D-9A64-C79116E21A63",
+      "publisherDisplayName": "DJservices",
       "showNameOnTiles": true
     },
     "copyright": "Copyright © Dhanunjay",
