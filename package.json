@@ -1,6 +1,15 @@
 {
   "build": {
     "appId": "com.dhanunjay.dj",
+    "appx": {
+      "applicationId": "Dhanunjay.DJ",
+      "backgroundColor": "#1b1b1b",
+      "displayName": "DJ",
+      "identityName": "REPLACE-WITH-RESERVED-PACKAGE-NAME",
+      "publisher": "CN=REPLACE-WITH-RESERVED-PUBLISHER-ID",
+      "publisherDisplayName": "REPLACE-WITH-PUBLISHER-DISPLAY-NAME",
+      "showNameOnTiles": true
+    },
     "copyright": "Copyright © Dhanunjay",
     "directories": {
       "output": "release"
@@ -81,6 +90,7 @@
     "dev:renderer": "vite",
     "pack": "npm run build && electron-builder --win --x64",
     "pack:dir": "npm run build && electron-builder --dir",
+    "pack:msix": "npm run build && electron-builder --win appx --x64",
     "start": "npm run build && electron .",
     "test": "vitest run",
     "test:watch": "vitest",

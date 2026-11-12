@@ -115,16 +115,18 @@ async function main(): Promise<void> {
   mainWindow = createWindow();
 
   // Self-update from GitHub Releases (installed app only — in dev
-  // the service stays idle). Checks on startup and once a day,
-  // downloads in the background, installs when DJ quits. Never
-  // restarts the app by itself; the UI shows the update state.
+  // the service stays idle, and in the Microsoft Store build it stays
+  // idle too, because the Store updates the app itself). Checks on
+  // startup and once a day, downloads in the background, installs when
+  // DJ quits. Never restarts the app by itself; the UI shows the update
+  // state.
   const updater = new UpdateService((s: UpdateState) => {
     const win = mainWindow;
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC.updateStatus, s);
     }
   });
-  void updater.start(app.isPackaged);
+  void updater.start(app.isPackaged, Boolean(process.windowsStore));
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

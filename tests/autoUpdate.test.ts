@@ -74,6 +74,11 @@ describe('shouldEnableAutoUpdate: installed app only', () => {
     expect(shouldEnableAutoUpdate(true)).toBe(true);
     expect(shouldEnableAutoUpdate(false)).toBe(false);
   });
+  it('off in the Microsoft Store build — the Store updates the app', () => {
+    expect(shouldEnableAutoUpdate(true, true)).toBe(false);
+    expect(shouldEnableAutoUpdate(false, true)).toBe(false);
+    expect(shouldEnableAutoUpdate(true, false)).toBe(true);
+  });
 });
 
 describe('UpdateService.check: a failed check is reported, not thrown', () => {

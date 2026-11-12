@@ -18,12 +18,21 @@
 //    (the parent handles that — it needs his token).
 //  - His data (index, folders, settings) lives in userData, outside
 //    the installed app folder, so an update never touches it.
+//  - Store build: when DJ runs from the Microsoft Store
+//    (process.windowsStore), GitHub self-update stays OFF — the Store
+//    updates the app itself. The two update routes must never fight.
 
 import type { UpdateState, UpdateStatus } from '../../shared/types';
 
-/** Auto-update only runs in the installed app, never in dev. */
-export function shouldEnableAutoUpdate(isPackaged: boolean): boolean {
-  return isPackaged;
+/**
+ * Auto-update only runs in the installed app, never in dev — and
+ * never in the Microsoft Store build, which the Store updates.
+ */
+export function shouldEnableAutoUpdate(
+  isPackaged: boolean,
+  isWindowsStore = false,
+): boolean {
+  return isPackaged && !isWindowsStore;
 }
 
 /** Plain text the UI shows for each update state. */
@@ -105,9 +114,10 @@ export class UpdateService {
 
   constructor(private readonly onStatus: (s: UpdateState) => void) {}
 
-  /** Start checking (installed app only). Safe to call in dev — no-op. */
-  async start(isPackaged: boolean): Promise<void> {
-    if (!shouldEnableAutoUpdate(isPackaged) || this.started) return;
+  /** Start checking (installed app only, never the Store build).
+   * Safe to call in dev — no-op. */
+  async start(isPackaged: boolean, isWindowsStore = false): Promise<void> {
+    if (!shouldEnableAutoUpdate(isPackaged, isWindowsStore) || this.started) return;
     this.started = true;
     // electron-updater is loaded lazily so unit tests can import this
     // module without Electron's updater machinery.

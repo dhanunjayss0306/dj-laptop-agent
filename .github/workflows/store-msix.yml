@@ -1,0 +1,87 @@
+# DJ v3.4 — Microsoft Store MSIX build.
+#
+# Builds the .msix package for the Microsoft Store on a Windows
+# runner. The MSIX build needs Windows tooling (makeappx from the
+# Windows SDK), so it CANNOT run on Linux — do not try to run this
+# workflow locally on this VM.
+#
+# The Store identity does not exist until the user reserves the app
+# name in Partner Center (storedeveloper.microsoft.com, Individual,
+# free). The identity values come in as workflow_dispatch inputs
+# below; scripts/apply-store-identity.mjs writes them into
+# package.json before the build. The placeholder defaults make the
+# job fail loudly if someone runs it without real values.
+#
+# The Store signs the uploaded package, so no signing certificate is
+# needed in CI. The .msix is uploaded as a build artifact; the parent
+# (or the user) submits it in Partner Center.
+#
+# The bundled embedding model is NOT in git (132 MB, gitignored), so
+# the job downloads it from ModelScope first (scripts/fetch-model.mjs).
+
+name: Store MSIX build
+
+on:
+  workflow_dispatch:
+    inputs:
+      store_display_name:
+        description: 'Store display name (e.g. DJ — change it if "DJ" is taken)'
+        required: true
+        default: 'DJ'
+        type: string
+      store_package_name:
+        description: 'Package Name from the Partner Center app reservation (e.g. Dhanunjay.DJFiles)'
+        required: true
+        default: 'REPLACE-WITH-RESERVED-PACKAGE-NAME'
+        type: string
+      store_publisher_id:
+        description: 'Publisher ID from the Partner Center reservation (full string starting with CN=)'
+        required: true
+        default: 'CN=REPLACE-WITH-RESERVED-PUBLISHER-ID'
+        type: string
+      store_publisher_display_name:
+        description: 'Publisher display name from the Partner Center reservation (e.g. Dhanunjay)'
+        required: true
+        default: 'REPLACE-WITH-PUBLISHER-DISPLAY-NAME'
+        type: string
+
+jobs:
+  build-msix:
+    name: Build MSIX for the Microsoft Store
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Download the bundled embedding model
+        run: node scripts/fetch-model.mjs
+
+      - name: Apply the Store identity
+        env:
+          STORE_DISPLAY_NAME: ${{ inputs.store_display_name }}
+          STORE_PACKAGE_NAME: ${{ inputs.store_package_name }}
+          STORE_PUBLISHER_ID: ${{ inputs.store_publisher_id }}
+          STORE_PUBLISHER_DISPLAY_NAME: ${{ inputs.store_publisher_display_name }}
+        run: node scripts/apply-store-identity.mjs
+
+      - name: Build the MSIX
+        run: npm run pack:msix
+
+      - name: Upload the MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: DJ-msix
+          path: release/*.appx
+          if-no-files-found: error
