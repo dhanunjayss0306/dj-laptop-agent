@@ -30,6 +30,8 @@ const api: DjApi = {
   openFile: (filePath) => ipcRenderer.invoke(IPC.openFile, filePath),
   pickFolder: () => ipcRenderer.invoke(IPC.pickFolder),
   openFolder: (folderPath) => ipcRenderer.invoke(IPC.openFolder, folderPath),
+  getSystemStats: () => ipcRenderer.invoke(IPC.getSystemStats),
+  getMemory: () => ipcRenderer.invoke(IPC.getMemory),
 
   onIndexProgress: (cb) => {
     const listener = (_e: IpcRendererEvent, p: IndexProgress): void => cb(p);

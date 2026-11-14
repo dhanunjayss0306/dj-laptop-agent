@@ -1,17 +1,23 @@
-// DJ v3.1 — the app window. A dark chat app, in the shape of the
-// Muse chat: an icon + name in the header, the conversation in the
-// middle (your messages right in blue, DJ's replies left on a
-// lighter surface), the input pinned at the bottom, and a sidebar
-// that slides in from the left with Folders, status, and shortcuts.
-// Rules only, no AI: summaries are picked from the file itself, and
-// the UI says so wherever a summary is shown (see ChatMessage,
-// 'summary' kind).
+// DJ v5.4 — the app window, rebuilt on the Astryx AppShell: a
+// top nav, a side nav with DJ's real sections, and a command
+// palette (Ctrl+K). The chat is the Command Center page; Files,
+// Duplicates, Organize, System, Memory, and Settings are real
+// pages behind the same shell. Rules only, no AI: summaries are
+// picked from the file itself, and the UI says so wherever a
+// summary is shown (see ChatMessage, 'summary' kind).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Avatar } from '@astryxdesign/core/Avatar';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppShell } from '@astryxdesign/core/AppShell';
+import { Badge } from '@astryxdesign/core/Badge';
 import { Button } from '@astryxdesign/core/Button';
+import { CommandPalette } from '@astryxdesign/core/CommandPalette';
 import { ProgressBar } from '@astryxdesign/core/ProgressBar';
+import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav';
+import { StatusDot } from '@astryxdesign/core/StatusDot';
 import { TextInput } from '@astryxdesign/core/TextInput';
+import { useToast } from '@astryxdesign/core/Toast';
+import { TopNav, TopNavHeading } from '@astryxdesign/core/TopNav';
+import { createStaticSource } from '@astryxdesign/core/Typeahead';
 
 import type {
   AppConfig,
@@ -22,9 +28,23 @@ import type {
   OrganizeRange,
   UpdateState,
 } from '../shared/types';
-import { ChatMessage, RANGES } from './components/ChatMessage';
+import { ChatMessage } from './components/ChatMessage';
+import { DuplicatesPage } from './components/DuplicatesPage';
+import { FilesPage } from './components/FilesPage';
 import { FoldersDialog } from './components/FoldersDialog';
+import { MemoryPage } from './components/MemoryPage';
+import { OrganizePage } from './components/OrganizePage';
+import { SettingsPage } from './components/SettingsPage';
+import { StatusCards } from './components/StatusCards';
+import { SystemPage } from './components/SystemPage';
 import { getEmbedderSource, getEmbedderState, reportEmbedderState } from './embedder';
+import {
+  PAGES,
+  PALETTE_COMMANDS,
+  capabilityBadge,
+  findPaletteCommand,
+  type PageId,
+} from './pages';
 
 interface DjMessage {
   id: number;
@@ -53,17 +73,22 @@ export default function App() {
   const [progress, setProgress] = useState<IndexProgress | null>(null);
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [foldersFirstRun, setFoldersFirstRun] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [page, setPage] = useState<PageId>('command');
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const toast = useToast();
 
   const pushDj = useCallback((response: ChatResponse) => {
     setMessages((prev) => [...prev, { id: nextId++, role: 'dj', response }]);
   }, []);
 
-  const pushDjText = useCallback((text: string) => {
-    pushDj({ kind: 'message', text });
-  }, [pushDj]);
+  const pushDjText = useCallback(
+    (text: string) => {
+      pushDj({ kind: 'message', text });
+    },
+    [pushDj],
+  );
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -114,7 +139,19 @@ export default function App() {
   // Keep the newest message visible.
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-  }, [messages, busy]);
+  }, [messages, busy, page]);
+
+  // Ctrl+K (or Cmd+K) opens the command palette from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const runBuildIndex = useCallback(async () => {
     setBuilding(true);
@@ -148,9 +185,10 @@ export default function App() {
       }
       setFoldersOpen(false);
       setFoldersFirstRun(false);
+      toast({ body: 'Folders saved. Rebuilding index.' });
       await runBuildIndex();
     },
-    [pushDjText, runBuildIndex],
+    [pushDjText, runBuildIndex, toast],
   );
 
   const handleSend = useCallback(
@@ -175,7 +213,6 @@ export default function App() {
 
   const handlePlanOrganize = useCallback(
     async (range: OrganizeRange) => {
-      setSidebarOpen(false);
       setBusy(true);
       try {
         const response = await window.dj.planOrganize(range);
@@ -230,10 +267,57 @@ export default function App() {
   );
 
   const openFoldersDialog = useCallback(() => {
-    setSidebarOpen(false);
     setFoldersFirstRun(false);
     setFoldersOpen(true);
   }, []);
+
+  // Command palette: one static source for pages + actions. Picking
+  // an item runs it — go to a page, or do the real action.
+  const paletteSource = useMemo(
+    () =>
+      createStaticSource(
+        PALETTE_COMMANDS.map((c) => ({
+          id: c.id,
+          label: c.label,
+          auxiliaryData: { group: c.group },
+        })),
+        { keywords: (item) => findPaletteCommand(item.id)?.keywords ?? [] },
+      ),
+    [],
+  );
+
+  const runPaletteCommand = useCallback(
+    (id: string) => {
+      setPaletteOpen(false);
+      const cmd = findPaletteCommand(id);
+      if (!cmd) return;
+      if (cmd.id.startsWith('page:')) {
+        setPage(cmd.id.slice('page:'.length) as PageId);
+        return;
+      }
+      switch (cmd.id) {
+        case 'action:rebuild-index':
+          void runBuildIndex();
+          break;
+        case 'action:folders':
+          openFoldersDialog();
+          break;
+        case 'action:find-duplicates':
+          setPage('duplicates');
+          break;
+        case 'action:organize-downloads':
+          setPage('organize');
+          break;
+        case 'action:refresh-status':
+          void refreshStatus();
+          toast({ body: 'Status refreshed.' });
+          break;
+        default:
+          break;
+      }
+    },
+    [openFoldersDialog, refreshStatus, runBuildIndex, toast],
+  );
 
   const embedderState = status?.embedderState ?? getEmbedderState();
   const embedderSource = status?.embedderSource ?? getEmbedderSource();
@@ -241,6 +325,7 @@ export default function App() {
   // is gone or the key expired this says so plainly, e.g.
   // "Core only: cloud key expired, local model not running".
   const capabilityMessage = status?.capability?.message ?? 'checking layers…';
+  const capability = capabilityBadge(status?.capability ?? null);
   const searchMode =
     status == null
       ? 'loading status…'
@@ -266,166 +351,169 @@ export default function App() {
       : 0;
 
   return (
-    <div className="dj-app">
-      <header className="dj-header">
-        <Button label="Menu" variant="ghost" onClick={() => setSidebarOpen(true)} />
-        <Avatar name="DJ" size="md" />
-        <div className="dj-header-title">
-          <h1 className="dj-title">DJ</h1>
-          <span className="dj-subtitle">your files, found</span>
-        </div>
-      </header>
-
-      {sidebarOpen ? (
-        <div className="dj-backdrop" onClick={() => setSidebarOpen(false)} />
-      ) : null}
-      <aside className={`dj-sidebar${sidebarOpen ? ' dj-sidebar-open' : ''}`}>
-        <div className="dj-sidebar-head">
-          <span className="dj-sidebar-title">DJ</span>
-          <Button label="Close" variant="ghost" size="sm" onClick={() => setSidebarOpen(false)} />
-        </div>
-
-        <div className="dj-sidebar-section">
-          <div className="dj-sidebar-label">Folders</div>
-          <div className="dj-sidebar-buttons">
-            <Button label="Folders" variant="secondary" onClick={openFoldersDialog} />
-            <Button
-              label="Rebuild index"
-              variant="secondary"
-              isDisabled={building}
-              onClick={() => {
-                setSidebarOpen(false);
-                void runBuildIndex();
-              }}
-            />
-          </div>
-        </div>
-
-        <div className="dj-sidebar-section">
-          <div className="dj-sidebar-label">Status</div>
-          <div className="dj-sidebar-status">
-            <div>
-              <strong>{status ? status.filesIndexed : '—'}</strong> files indexed
-            </div>
-            <div>
-              <strong>{status ? status.foldersIndexed : '—'}</strong> folders indexed
-            </div>
-            <div>{searchMode}</div>
-            <div>{embedderLabel}</div>
-            <div>{capabilityMessage}</div>
-            {update && update.status !== 'idle' ? <div>{update.message}</div> : null}
-          </div>
-        </div>
-
-        <div className="dj-sidebar-section">
-          <div className="dj-sidebar-label">Organize Downloads</div>
-          <div className="dj-row">
-            {RANGES.map(({ label, range }) => (
-              <Button
-                key={label}
-                label={label}
-                variant="secondary"
-                size="sm"
-                onClick={() => void handlePlanOrganize(range)}
+    <AppShell
+      topNav={
+        <TopNav
+          heading={<TopNavHeading heading="DJ" />}
+          endContent={
+            <>
+              <StatusDot variant={capability.dot} label={capability.dotLabel} />
+              <Badge label={capability.label} variant={capability.variant} />
+              <Button label="Search" variant="ghost" onClick={() => setPaletteOpen(true)} />
+            </>
+          }
+        />
+      }
+      sideNav={
+        <SideNav header={<SideNavHeading heading="DJ" />}>
+          <SideNavSection title="DJ">
+            {PAGES.map((p) => (
+              <SideNavItem
+                key={p.id}
+                label={p.label}
+                isSelected={page === p.id}
+                onClick={() => setPage(p.id)}
               />
             ))}
+          </SideNavSection>
+          <SideNavSection title="Status">
+            <p className="dj-nav-status">
+              {status ? `${status.filesIndexed} files indexed` : 'loading status…'}
+            </p>
+            <p className="dj-nav-status">{searchMode}</p>
+            <p className="dj-nav-status">{embedderLabel}</p>
+          </SideNavSection>
+        </SideNav>
+      }
+    >
+      <div className="dj-page-shell">
+        {status?.indexStale ? (
+          <div className="dj-stale">
+            The search index was built with an older format — Rebuild index to use meaning
+            search.
           </div>
-        </div>
+        ) : null}
 
-        <div className="dj-sidebar-section">
-          <div className="dj-sidebar-label">Duplicates</div>
-          <div className="dj-sidebar-buttons">
-            <Button
-              label="Find duplicates"
-              variant="secondary"
-              onClick={() => {
-                setSidebarOpen(false);
-                void handleSend('find duplicates');
-              }}
+        {update?.status === 'ready' ? (
+          <div className="dj-update">{update.message}</div>
+        ) : null}
+
+        {(building || (progress && progress.stage !== 'done')) && (
+          <div className="dj-progress">
+            {progress?.message ? (
+              <p className="dj-progress-message">{progress.message}</p>
+            ) : null}
+            <ProgressBar
+              label="Building index"
+              value={progressValue}
+              max={100}
+              hasValueLabel
+              isIndeterminate={!progress || progress.total === 0}
             />
           </div>
-        </div>
-      </aside>
-
-      {status?.indexStale ? (
-        <div className="dj-stale">
-          The search index was built with an older format — Rebuild index to use meaning
-          search.
-        </div>
-      ) : null}
-
-      {update?.status === 'ready' ? (
-        <div className="dj-update">{update.message}</div>
-      ) : null}
-
-      {(building || (progress && progress.stage !== 'done')) && (
-        <div className="dj-progress">
-          {progress?.message ? (
-            <p className="dj-progress-message">{progress.message}</p>
-          ) : null}
-          <ProgressBar
-            label="Building index"
-            value={progressValue}
-            max={100}
-            hasValueLabel
-            isIndeterminate={!progress || progress.total === 0}
-          />
-        </div>
-      )}
-
-      <main className="dj-chat">
-        {messages.map((msg) =>
-          msg.role === 'user' ? (
-            <div className="dj-msg dj-msg-user" key={msg.id}>
-              <p className="dj-text">{msg.text}</p>
-            </div>
-          ) : (
-            <div className="dj-msg dj-msg-dj" key={msg.id}>
-              {msg.response ? (
-                <ChatMessage
-                  response={msg.response}
-                  actions={{
-                    onOpenFile: (path) => void handleOpenFile(path),
-                    onOpenFolder: (path) => void handleOpenFolder(path),
-                    onPlanOrganize: (range) => void handlePlanOrganize(range),
-                    onApplyOrganize: (plan) => void handleApplyOrganize(plan),
-                    onDuplicateResult: (text) => pushDjText(text),
-                  }}
-                />
-              ) : (
-                <p className="dj-text">{msg.text}</p>
-              )}
-            </div>
-          ),
         )}
-        {busy ? <div className="dj-working">DJ is working...</div> : null}
-        <div ref={chatEndRef} />
-      </main>
 
-      <form
-        className="dj-composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void handleSend(input);
-        }}
-      >
-        <div className="dj-composer-input">
-          <TextInput
-            label="Message DJ"
-            isLabelHidden
-            placeholder="Find a file, open a folder, organize Downloads..."
-            value={input}
-            onChange={(value) => setInput(value)}
-            isDisabled={busy}
+        {page === 'command' ? (
+          <div className="dj-command-page">
+            <StatusCards
+              status={status}
+              onRebuildIndex={() => void runBuildIndex()}
+              onOpenFolders={openFoldersDialog}
+            />
+            <main className="dj-chat">
+              {messages.map((msg) =>
+                msg.role === 'user' ? (
+                  <div className="dj-msg dj-msg-user" key={msg.id}>
+                    <p className="dj-text">{msg.text}</p>
+                  </div>
+                ) : (
+                  <div className="dj-msg dj-msg-dj" key={msg.id}>
+                    {msg.response ? (
+                      <ChatMessage
+                        response={msg.response}
+                        actions={{
+                          onOpenFile: (path) => void handleOpenFile(path),
+                          onOpenFolder: (path) => void handleOpenFolder(path),
+                          onPlanOrganize: (range) => void handlePlanOrganize(range),
+                          onApplyOrganize: (plan) => void handleApplyOrganize(plan),
+                          onDuplicateResult: (text) => pushDjText(text),
+                        }}
+                      />
+                    ) : (
+                      <p className="dj-text">{msg.text}</p>
+                    )}
+                  </div>
+                ),
+              )}
+              {busy ? <div className="dj-working">DJ is working...</div> : null}
+              <div ref={chatEndRef} />
+            </main>
+
+            <form
+              className="dj-composer"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleSend(input);
+              }}
+            >
+              <div className="dj-composer-input">
+                <TextInput
+                  label="Message DJ"
+                  isLabelHidden
+                  placeholder="Find a file, open a folder, organize Downloads..."
+                  value={input}
+                  onChange={(value) => setInput(value)}
+                  isDisabled={busy}
+                />
+              </div>
+              <Button
+                label="Send"
+                variant="primary"
+                type="submit"
+                isDisabled={busy || input.trim() === ''}
+              />
+            </form>
+          </div>
+        ) : null}
+
+        {page === 'files' ? (
+          <FilesPage
+            onOpenFile={(path) => void handleOpenFile(path)}
+            onRebuildIndex={() => void runBuildIndex()}
           />
-        </div>
-        <Button
-          label="Send"
-          variant="primary"
-          type="submit"
-          isDisabled={busy || input.trim() === ''}
-        />
-      </form>
+        ) : null}
+
+        {page === 'duplicates' ? (
+          <DuplicatesPage onResult={(text) => pushDjText(text)} />
+        ) : null}
+
+        {page === 'organize' ? <OrganizePage /> : null}
+
+        {page === 'system' ? <SystemPage /> : null}
+
+        {page === 'memory' ? <MemoryPage /> : null}
+
+        {page === 'settings' ? (
+          <SettingsPage
+            status={status}
+            config={config}
+            onOpenFolders={openFoldersDialog}
+            onRebuildIndex={() => void runBuildIndex()}
+            onRefreshStatus={() => void refreshStatus()}
+          />
+        ) : null}
+
+        <p className="dj-capability-line">{capabilityMessage}</p>
+      </div>
+
+      <CommandPalette
+        isOpen={paletteOpen}
+        onOpenChange={(open) => setPaletteOpen(open)}
+        searchSource={paletteSource}
+        onValueChange={(value) => runPaletteCommand(value)}
+        emptySearchText="No matching page or action"
+        emptyBootstrapText="Type to search pages and actions"
+      />
 
       <FoldersDialog
         isOpen={foldersOpen}
@@ -434,6 +522,6 @@ export default function App() {
         onOpenChange={(open) => setFoldersOpen(open)}
         onSave={(next) => void handleSaveFolders(next)}
       />
-    </div>
+    </AppShell>
   );
 }

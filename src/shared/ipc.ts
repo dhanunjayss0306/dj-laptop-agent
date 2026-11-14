@@ -13,9 +13,11 @@ import type {
   EmbedResponse,
   IndexCounts,
   IndexProgress,
+  MemoryContent,
   OrganizeMove,
   OrganizeRange,
   SearchResult,
+  SystemStats,
   UpdateState,
 } from './types';
 
@@ -53,6 +55,10 @@ export const IPC = {
   embedderSource: 'dj:embedder-source',
   /** Main -> renderer: auto-update progress (checking / ready / error). */
   updateStatus: 'dj:update-status',
+  /** Renderer -> main: real system numbers (os module) for the System page. */
+  getSystemStats: 'dj:get-system-stats',
+  /** Renderer -> main: the v5.3 memory files, read-only, for the Memory page. */
+  getMemory: 'dj:get-memory',
 } as const;
 
 /** The typed API the preload script exposes as window.dj. */
@@ -99,6 +105,10 @@ export interface DjApi {
   sendEmbedderSource(source: string): void;
   /** Auto-update progress from main. Returns an unsubscribe function. */
   onUpdateStatus(cb: (s: UpdateState) => void): () => void;
+  /** Real system numbers from the main process (os module). */
+  getSystemStats(): Promise<SystemStats>;
+  /** The v5.3 memory files, read-only. */
+  getMemory(): Promise<MemoryContent>;
 }
 
 declare global {

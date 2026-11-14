@@ -233,6 +233,36 @@ export interface IndexProgress {
   message: string;
 }
 
+/** Real system numbers for the System page, read in the main
+ *  process from Node's os module. cpuPercent is null when the
+ *  system cannot measure it — the UI says so instead of inventing
+ *  a number. Disk usage is not included: there is no reliable
+ *  built-in call for it on Windows. */
+export interface SystemStats {
+  /** CPU use in percent, measured from two os.cpus() samples
+   *  500 ms apart. Null when it could not be measured. */
+  cpuPercent: number | null;
+  cpuCores: number;
+  totalMemBytes: number;
+  freeMemBytes: number;
+  /** Seconds since the system booted (os.uptime()). */
+  uptimeSeconds: number;
+  platform: string;
+  checkedAt: string;
+}
+
+/** One daily note file (memory/YYYY-MM-DD.md), read-only. */
+export interface MemoryDay {
+  date: string;
+  text: string;
+}
+
+/** The v5.3 memory files, read-only for the Memory page. */
+export interface MemoryContent {
+  memoryMd: string;
+  daily: MemoryDay[];
+}
+
 export interface IndexCounts {
   files: number;
   folders: number;

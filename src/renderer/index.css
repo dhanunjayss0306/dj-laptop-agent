@@ -28,94 +28,146 @@ body {
   line-height: 1.5;
 }
 
-.dj-app {
+/* AppShell pages (v5.4) — the shell fills the window; each page
+   is a flex column that scrolls on its own. */
+
+.dj-page-shell {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background: #1b1b1b;
-  color: #f1f1f1;
+  height: 100%;
+  min-height: 0;
 }
 
-/* Header — menu button, DJ icon, name */
-
-.dj-header {
+.dj-command-page {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #303030;
-  background: #1b1b1b;
-  flex-shrink: 0;
+  padding-top: 4px;
 }
 
-.dj-header-title {
+.dj-page {
   display: flex;
   flex-direction: column;
-  line-height: 1.2;
-}
-
-.dj-title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.dj-subtitle {
-  font-size: 12px;
-  color: #b9b9b9;
-}
-
-/* Slide-in sidebar */
-
-.dj-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 20;
-}
-
-.dj-sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 288px;
-  max-width: 85vw;
-  background: #141414;
-  border-right: 1px solid #303030;
-  z-index: 30;
-  transform: translateX(-100%);
-  transition: transform 200ms ease;
-  display: flex;
-  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 12px 16px 16px;
-  gap: 20px;
+  gap: 12px;
+  padding: 4px 0 12px;
 }
 
-.dj-sidebar-open {
-  transform: translateX(0);
-}
-
-.dj-sidebar-head {
+.dj-page-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
-.dj-sidebar-title {
-  font-size: 16px;
+.dj-page-title {
+  margin: 0;
+  font-size: 18px;
   font-weight: 700;
+  line-height: 1.2;
 }
 
-.dj-sidebar-section {
+.dj-page-note {
+  margin: 0;
+  font-size: 13px;
+  color: #b9b9b9;
+}
+
+/* SideNav status lines under the nav items. */
+
+.dj-nav-status {
+  margin: 0;
+  padding: 2px 12px;
+  font-size: 12px;
+  color: #b9b9b9;
+  word-break: break-word;
+}
+
+/* Capability line pinned under the current page. */
+
+.dj-capability-line {
+  margin: 0;
+  padding: 8px 2px 0;
+  border-top: 1px solid #303030;
+  font-size: 12px;
+  color: #b9b9b9;
+  flex-shrink: 0;
+}
+
+/* Status cards grid (Command Center). */
+
+.dj-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.dj-stat-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.dj-sidebar-label {
+.dj-stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dj-stat-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dj-stat-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dj-stat-value {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dj-stat-unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: #b9b9b9;
+}
+
+.dj-stat-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d6d6d6;
+  word-break: break-word;
+}
+
+.dj-stat-note {
+  margin: 0;
+  font-size: 12px;
+  color: #b9b9b9;
+  line-height: 1.5;
+}
+
+.dj-stat-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dj-stat-label {
   font-size: 12px;
   font-weight: 600;
   color: #b9b9b9;
@@ -123,24 +175,51 @@ body {
   letter-spacing: 0.04em;
 }
 
-.dj-sidebar-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
+.dj-stat-source {
+  margin: 0;
+  font-size: 12px;
+  color: #9a9a9a;
 }
 
-.dj-sidebar-status {
+.dj-stat-row-line {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
-  color: #b9b9b9;
 }
 
-.dj-sidebar-status strong {
-  color: #f1f1f1;
-  font-weight: 600;
+/* Search form (Files page) and memory search. */
+
+.dj-search-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.dj-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dj-search-input > * {
+  width: 100%;
+}
+
+.dj-memory-search {
+  flex-shrink: 0;
+}
+
+.dj-memory-search > * {
+  width: 100%;
+}
+
+.dj-memory-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d6d6d6;
 }
 
 /* Stale-index notice + index progress */

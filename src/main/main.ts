@@ -213,6 +213,7 @@ async function main(): Promise<void> {
     chat,
     duplicates,
     capability,
+    dataDir,
   });
 
   mainWindow = createWindow();

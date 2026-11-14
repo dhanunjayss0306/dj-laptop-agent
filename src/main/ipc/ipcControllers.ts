@@ -13,9 +13,11 @@ import type {
   DuplicateGroup,
   EmbedResponse,
   IndexCounts,
+  MemoryContent,
   OrganizeMove,
   OrganizeRange,
   SearchResult,
+  SystemStats,
 } from '../../shared/types';
 import { IPC } from '../../shared/ipc';
 import type { ConfigRepository } from '../config';
@@ -26,6 +28,7 @@ import type { CapabilityManager } from '../v53/capability';
 import { openApp } from '../services/appLauncher';
 import { openFile, openFolder } from '../services/actions';
 import { DuplicateService } from '../services/duplicateService';
+import { readMemoryContent, readSystemStats } from '../services/systemStats';
 import { getDownloadsDir, getHomeDir } from '../utils/paths';
 
 export interface ControllerContext {
@@ -38,6 +41,8 @@ export interface ControllerContext {
   duplicates: DuplicateService;
   /** v5.3: the capability-layer manager (cloud/local/core). */
   capability: CapabilityManager;
+  /** DJ's data folder (memory files live here). */
+  dataDir: string;
 }
 
 export function registerIpc(ctx: ControllerContext): void {
@@ -156,6 +161,18 @@ export function registerIpc(ctx: ControllerContext): void {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+
+  // -- v5.4: System + Memory pages -------------------------------------
+  // Real numbers from the os module; nothing estimated. Memory is
+  // read-only: the page shows the files, it never writes them.
+
+  ipcMain.handle(IPC.getSystemStats, async (): Promise<SystemStats> => {
+    return readSystemStats();
+  });
+
+  ipcMain.handle(IPC.getMemory, async (): Promise<MemoryContent> => {
+    return readMemoryContent(ctx.dataDir);
   });
 
   // -- embedder answers from the renderer --------------------------------------
