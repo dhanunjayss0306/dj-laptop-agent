@@ -5,6 +5,7 @@
 
 import type {
   AppConfig,
+  CapabilityStatus,
   ChatResponse,
   DjStatus,
   DuplicateGroup,
@@ -22,6 +23,8 @@ import type {
  *  send/on = pushed events. */
 export const IPC = {
   getStatus: 'dj:get-status',
+  /** v5.3: force a fresh capability-layer check (cloud/local/core). */
+  getCapability: 'dj:get-capability',
   getConfig: 'dj:get-config',
   saveConfig: 'dj:save-config',
   buildIndex: 'dj:build-index',
@@ -55,6 +58,8 @@ export const IPC = {
 /** The typed API the preload script exposes as window.dj. */
 export interface DjApi {
   getStatus(): Promise<DjStatus>;
+  /** v5.3: which capability layer is active and why (fresh check). */
+  getCapability(): Promise<CapabilityStatus>;
   getConfig(): Promise<AppConfig>;
   saveConfig(config: AppConfig): Promise<AppConfig>;
   buildIndex(): Promise<IndexCounts>;

@@ -227,6 +227,10 @@ export default function App() {
 
   const embedderState = status?.embedderState ?? getEmbedderState();
   const embedderSource = status?.embedderSource ?? getEmbedderSource();
+  // v5.3: which capability layer is active and why. When the model
+  // is gone or the key expired this says so plainly, e.g.
+  // "Core only: cloud key expired, local model not running".
+  const capabilityMessage = status?.capability?.message ?? 'checking layers…';
   const searchMode =
     status == null
       ? 'loading status…'
@@ -298,6 +302,7 @@ export default function App() {
             </div>
             <div>{searchMode}</div>
             <div>{embedderLabel}</div>
+            <div>{capabilityMessage}</div>
             {update && update.status !== 'idle' ? <div>{update.message}</div> : null}
           </div>
         </div>

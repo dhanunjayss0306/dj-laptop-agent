@@ -9,6 +9,62 @@ export interface FolderEntry {
 
 export interface AppConfig {
   folders: FolderEntry[];
+  /** Optional local model setup (Layer 1). No key, just a local server. */
+  localModel?: { kind: 'ollama' | 'lmstudio'; model?: string };
+  /** Optional cloud provider (Layer 2). The key lives on this laptop
+   *  only, in dj_config.json — it is never sent anywhere except to
+   *  the provider the user picked. Leave it out and DJ runs fine. */
+  cloud?: { provider: 'openai' | 'openrouter' | 'anthropic'; apiKey?: string };
+}
+
+// --- DJ v5.3: three capability layers ------------------------------------
+// Layer 0 Core: always on, no model, no key — rules + tiny embeddings.
+// Layer 1 Local: an optional local model (Ollama / LM Studio) if running.
+// Layer 2 Cloud: an optional provider key. When the model is gone or
+// the key expires, DJ falls back down the layers and says so plainly.
+// Core file work never depends on Layer 1 or 2.
+
+export type CapabilityLayer = 'core' | 'local' | 'cloud';
+
+export interface LocalModelHealth {
+  available: boolean;
+  /** e.g. "Ollama (qwen3.5:9b)". */
+  name?: string;
+  /** Plain reason when not available, e.g. "local model not running". */
+  reason?: string;
+}
+
+export interface CloudHealth {
+  configured: boolean;
+  /** true = key works, false = key rejected, null = not checked yet. */
+  valid: boolean | null;
+  /** Plain reason when not usable, e.g. "cloud key expired (401)". */
+  reason?: string;
+  statusCode?: number;
+}
+
+export interface CapabilityStatus {
+  layer: CapabilityLayer;
+  local: LocalModelHealth;
+  cloud: CloudHealth;
+  /** Plain words for the UI, e.g.
+   *  "Core only: cloud key expired, local model not running". */
+  message: string;
+  checkedAt: string;
+}
+
+/** One interaction trace (OpenJarvis idea): what ran, how long, what
+ *  fell back. Kept in memory only, never sent anywhere. */
+export interface TraceRecord {
+  id: string;
+  at: string;
+  route: string;
+  tools: string[];
+  /** Milliseconds the interaction took. */
+  ms: number;
+  layer: CapabilityLayer;
+  /** What fell back, when it did, e.g. "cloud 401 -> local". */
+  fallback?: string;
 }
 
 export interface SearchResult {
@@ -78,6 +134,8 @@ export interface DjStatus {
   indexStale: boolean;
   /** The current folder config. */
   config: AppConfig;
+  /** v5.3: which capability layer is active and why. */
+  capability: CapabilityStatus;
 }
 
 export interface OrganizeMove {

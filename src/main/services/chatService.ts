@@ -13,6 +13,10 @@ import { openFile, openFolder } from './actions';
 import { OrganizeService } from './organizeService';
 import { summarizeText } from './summarizeService';
 import { getDownloadsDir, getHomeDir } from '../utils/paths';
+// v5.3 (jev-chat idea): judge before acting. Destructive work is
+// scored and blocked when it has no clear target; the UI still asks
+// the user to confirm before anything runs. Nothing auto-deletes.
+import { judgeAction } from '../v53/judge';
 
 export class ChatService {
   private readonly brain = new BrainService();
@@ -230,13 +234,34 @@ export class ChatService {
     };
   }
 
-  /** Delete picked duplicate copies to the Recycle Bin. */
+  /** Delete picked duplicate copies to the Recycle Bin. Judged
+   *  first: with no clear target the delete is blocked and nothing
+   *  runs. The UI still asks the user to confirm. */
   async deleteDuplicates(paths: string[]): Promise<{ deleted: string[]; errors: string[]; logPath: string }> {
+    const judged = judgeAction({
+      kind: 'delete',
+      text: 'delete the extra copies',
+      destructive: true,
+      targetCount: paths.length,
+    });
+    if (judged.blocked.length > 0) {
+      return { deleted: [], errors: judged.blocked, logPath: '' };
+    }
     return this.duplicates.deleteToRecycleBin(paths, getDownloadsDir(getHomeDir()));
   }
 
-  /** Merge one duplicate group into a folder the user picked. */
+  /** Merge one duplicate group into a folder the user picked.
+   *  Judged first, same as delete. */
   mergeDuplicates(paths: string[], targetFolder: string): { moved: string[]; errors: string[] } {
+    const judged = judgeAction({
+      kind: 'merge',
+      text: `merge the extra copies into ${targetFolder}`,
+      destructive: true,
+      targetCount: paths.length,
+    });
+    if (judged.blocked.length > 0) {
+      return { moved: [], errors: judged.blocked };
+    }
     return this.duplicates.merge(paths, targetFolder);
   }
 }

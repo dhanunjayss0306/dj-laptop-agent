@@ -7,6 +7,7 @@ import { dialog, ipcMain, type BrowserWindow } from 'electron';
 
 import type {
   AppConfig,
+  CapabilityStatus,
   ChatResponse,
   DjStatus,
   DuplicateGroup,
@@ -21,6 +22,7 @@ import type { ConfigRepository } from '../config';
 import type { EmbedderClient } from '../services/embedderClient';
 import type { IndexService } from '../services/indexService';
 import type { ChatService } from '../services/chatService';
+import type { CapabilityManager } from '../v53/capability';
 import { openApp } from '../services/appLauncher';
 import { openFile, openFolder } from '../services/actions';
 import { DuplicateService } from '../services/duplicateService';
@@ -34,17 +36,19 @@ export interface ControllerContext {
   embedder: EmbedderClient;
   chat: ChatService;
   duplicates: DuplicateService;
+  /** v5.3: the capability-layer manager (cloud/local/core). */
+  capability: CapabilityManager;
 }
 
 export function registerIpc(ctx: ControllerContext): void {
-  const { indexer, embedder, chat, configRepo } = ctx;
+  const { indexer, embedder, chat, configRepo, capability } = ctx;
 
   const enabledFolders = (): string[] =>
     configRepo.load().folders.filter((f) => f.enabled).map((f) => f.path);
 
   // -- status & config ------------------------------------------------
 
-  ipcMain.handle(IPC.getStatus, (): DjStatus => {
+  ipcMain.handle(IPC.getStatus, async (): Promise<DjStatus> => {
     const config = configRepo.load();
     const { filesIndexed, foldersIndexed, vectorOk } = indexer.status();
     return {
@@ -56,7 +60,15 @@ export function registerIpc(ctx: ControllerContext): void {
       hasIndex: indexer.hasIndex(),
       indexStale: indexer.indexIsStale(),
       config,
+      // v5.3: which layer is active and why. A dead model or an
+      // expired key shows here as "Core only: ...", plainly.
+      capability: await capability.resolve(),
     };
+  });
+
+  // v5.3: force a fresh layer check (bypasses the 30 s cache).
+  ipcMain.handle(IPC.getCapability, async (): Promise<CapabilityStatus> => {
+    return capability.resolve(true);
   });
 
   ipcMain.handle(IPC.getConfig, (): AppConfig => configRepo.load());

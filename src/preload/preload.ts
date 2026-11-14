@@ -14,6 +14,7 @@ import type {
 
 const api: DjApi = {
   getStatus: () => ipcRenderer.invoke(IPC.getStatus),
+  getCapability: () => ipcRenderer.invoke(IPC.getCapability),
   getConfig: () => ipcRenderer.invoke(IPC.getConfig),
   saveConfig: (config) => ipcRenderer.invoke(IPC.saveConfig, config),
   buildIndex: () => ipcRenderer.invoke(IPC.buildIndex),
