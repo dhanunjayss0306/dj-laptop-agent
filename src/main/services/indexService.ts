@@ -17,19 +17,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { IndexCounts, IndexProgress, SearchResult } from '../../shared/types';
-import type { IndexedFile, IndexedFolder } from '../domain/types';
+import type { IndexedFile, IndexedFolder, StoredVector } from '../domain/types';
 import { KeywordIndexRepository } from '../repositories/keywordIndexRepository';
 import { EMBED_FORMAT_VERSION } from '../repositories/vectorRepository';
 import { fileId } from '../utils/hashing';
-import { chunkText, countOccurrences, snippet } from '../utils/text';
+import { chunkPdfText, chunkText, CHUNK_VERSION, countOccurrences, snippet } from '../utils/text';
 import type { EmbedderClient } from './embedderClient';
-import { readText } from './fileReader';
+import { readFileContent, readText, type ReadStatus } from './fileReader';
 import { VectorStore } from './vectorStore';
 
 // File types DJ can read text from.
 export const READABLE_EXTS = new Set([
   '.txt', '.md', '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css',
-  '.json', '.csv', '.log', '.pdf', '.docx',
+  '.json', '.csv', '.log', '.pdf', '.docx', '.pptx', '.xlsx',
 ]);
 
 // Folders DJ never walks into, even inside the folders the user picked.
@@ -45,12 +45,53 @@ export const MAX_FILE_MB = 20;
 // How much of a file's text the keyword index keeps (first 12,000 chars).
 export const KEYWORD_TEXT_LIMIT = 12000;
 
-const EMBED_BATCH = 10;
+const EMBED_BATCH = 5;
 
 // How often progress may be sent to the window (ms). The build
 // used to send one progress message per file — thousands of IPC
 // messages and React re-renders — which helped freeze the window.
 const PROGRESS_MIN_MS = 150;
+
+// How long one file may take to read before it is skipped: a
+// corrupt PDF can hang pdf-parse, and one bad file must never
+// stall the whole build. The file is logged and counted, and the
+// build keeps going.
+const READ_TIMEOUT_MS = 15_000;
+
+// How many skipped file names the build report keeps (first 20).
+const SKIPPED_NAMES_MAX = 20;
+
+// Plain words attached to keyword results when meaning search
+// could not run (same wording as chatService.meaningNote).
+const MEANING_LOADING_NOTE =
+  'Meaning search is still loading — these are keyword matches for now.';
+const MEANING_UNAVAILABLE_NOTE =
+  'Meaning search is unavailable right now — these are keyword matches.';
+
+/** Race a promise against a clock. The slow work is abandoned —
+ *  for pdf-parse that means the parse keeps running in the
+ *  background, but the build no longer waits on it. */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
+/** Plain-language note for a file with no readable text. */
+function noTextNote(filePath: string, status: ReadStatus): string {
+  const name = path.basename(filePath);
+  if (status === 'no-text') {
+    return `${name} has no readable text inside — scanned image, needs OCR.`;
+  }
+  if (status === 'encrypted') {
+    return `${name} is locked (encrypted) — open it with its password first.`;
+  }
+  return '';
+}
 
 // How often the build lets the main-process event loop run other
 // work (ms). Without this the build is one long stretch of
@@ -78,6 +119,19 @@ export function statMeta(filePath: string): { size?: number; mtime?: string } {
 
 export type ProgressCallback = (p: IndexProgress) => void;
 
+/** One file found by the walk, with the size + last-modified time
+ *  a rebuild needs to tell "unchanged" from "changed". */
+export interface WalkEntry {
+  path: string;
+  size: number;
+  mtimeMs: number;
+}
+
+/** What meaning search did on the last search — the chat uses
+ *  this to say plainly when results are keyword-only because the
+ *  model is still loading or unavailable. */
+export type MeaningStatus = 'ready' | 'loading' | 'unavailable' | 'not-indexed';
+
 export class IndexService {
   private readonly keywordRepo: KeywordIndexRepository;
   private readonly store: VectorStore;
@@ -86,6 +140,9 @@ export class IndexService {
 
   /** True when the vector store has usable vectors. */
   vectorOk = false;
+
+  /** What meaning search did on the last search. */
+  lastMeaning: MeaningStatus = 'not-indexed';
 
   /** Last time a progress message was sent (ms since epoch). */
   private lastProgressAt = 0;
@@ -186,9 +243,12 @@ export class IndexService {
    * Async, and it yields to the event loop as it goes: the walk
    * used to be one long synchronous stretch that froze the window
    * ("Not Responding") on a big folder tree.
+   *
+   * Each entry carries size + last-modified time, so a rebuild can
+   * tell an unchanged file from a changed one without reading it.
    */
-  async iterFiles(folders: string[]): Promise<string[]> {
-    const found: string[] = [];
+  async iterFileEntries(folders: string[]): Promise<WalkEntry[]> {
+    const found: WalkEntry[] = [];
     const seen = new Set<string>();
     for (const folder of folders) {
       if (!isDirectory(folder)) {
@@ -200,8 +260,8 @@ export class IndexService {
       console.log(`DJ: scanning ${display} ...`);
       this.progress('scan', found.length, 0, `Scanning ${display}...`);
       try {
-        await this.walkDir(folder, (filePath) => {
-          found.push(filePath);
+        await this.walkDir(folder, (filePath, size, mtimeMs) => {
+          found.push({ path: filePath, size, mtimeMs });
           if (found.length % 200 === 0) {
             const msg = `Scanning ${display}... ${found.length} files found`;
             console.log(`DJ: ${msg}`);
@@ -218,9 +278,14 @@ export class IndexService {
     return found;
   }
 
+  /** Paths only, for callers that do not need sizes. */
+  async iterFiles(folders: string[]): Promise<string[]> {
+    return (await this.iterFileEntries(folders)).map((e) => e.path);
+  }
+
   private async walkDir(
     dir: string,
-    onFile: (filePath: string) => void,
+    onFile: (filePath: string, size: number, mtimeMs: number) => void,
     seen: Set<string>,
     onDir?: (dirPath: string) => void,
   ): Promise<void> {
@@ -245,8 +310,11 @@ export class IndexService {
         if (entry.name.startsWith('.')) continue;
         if (!READABLE_EXTS.has(path.extname(entry.name).toLowerCase())) continue;
         let size = 0;
+        let mtimeMs = 0;
         try {
-          size = fs.statSync(full).size;
+          const st = fs.statSync(full);
+          size = st.size;
+          mtimeMs = st.mtimeMs;
         } catch {
           continue;
         }
@@ -259,7 +327,7 @@ export class IndexService {
         }
         if (seen.has(key)) continue;
         seen.add(key);
-        onFile(full);
+        onFile(full, size, mtimeMs);
       }
       // Anything else (sockets, fifos, ...): skip.
       visited += 1;
@@ -314,7 +382,29 @@ export class IndexService {
     return found;
   }
 
-  /** Build (or rebuild) the whole index. Returns counts. */
+  /**
+   * Build (or rebuild) the whole index. Returns counts.
+   *
+   * Incremental (v5.5): a file whose size + last-modified time
+   * match the saved index is NOT read or re-embedded — its keyword
+   * entry and its vectors are reused as-is. Only new or changed
+   * files are read and embedded, and files that are gone drop out.
+   * A normal rebuild after adding a few files is therefore seconds,
+   * not a full re-read of 60,000 files.
+   *
+   * Two phases: (1) read the changed files and save the keyword
+   * index at once, so keyword search works immediately; (2) embed
+   * the new chunks in small batches, so the window keeps answering
+   * while the model works. If the embedder is down, phase 1 still
+   * lands and the stored vectors of reused files are kept — the
+   * build never wipes good vectors because the model was off.
+   *
+   * One slow or broken file cannot stall the build: each read has
+   * a 15 s timeout, the file is logged and counted, and the build
+   * keeps going. A scanned PDF (no extractable text) and a locked
+   * PDF are indexed by name with an honest note, never silently
+   * dropped.
+   */
   async build(folders: string[]): Promise<IndexCounts> {
     const counts: IndexCounts = {
       files: 0,
@@ -326,30 +416,169 @@ export class IndexService {
       errors: 0,
       seconds: 0,
       vectorOk: false,
+      reused: 0,
+      new: 0,
+      removed: 0,
+      skippedNames: [],
     };
     const t0 = Date.now();
     this.lastProgressAt = 0;
     this.lastYieldAt = Date.now();
     this.progress('scan', 0, 1, 'Looking through your folders...');
-    const files = await this.iterFiles(folders);
-    const total = Math.max(files.length, 1);
+    const entries = await this.iterFileEntries(folders);
+    const total = Math.max(entries.length, 1);
 
-    // Fresh vector store for this build; the old one is replaced
-    // only if the new build produces vectors.
-    const newRows: {
+    // -- partition: reuse what did not change -----------------------
+    const savedByPath = new Map(this.keywordFiles.map((f) => [f.path, f]));
+    const entryByPath = new Map(entries.map((e) => [e.path, e]));
+    for (const p of savedByPath.keys()) {
+      if (!entryByPath.has(p)) counts.removed = (counts.removed ?? 0) + 1;
+    }
+    // Vectors the last build stored, grouped by file, for reuse.
+    const storedRowsByPath = new Map<string, StoredVector[]>();
+    for (const row of this.store.getRows()) {
+      const list = storedRowsByPath.get(row.path) ?? [];
+      list.push(row);
+      storedRowsByPath.set(row.path, list);
+    }
+    // Chunking changed for PDFs in v5.5 (page-aware). An old store
+    // has no chunk version, so its PDF rows are re-embedded once;
+    // every other file's rows are reused as-is.
+    const chunkOk = this.store.storedChunkVersion === CHUNK_VERSION;
+
+    const keywordFiles: IndexedFile[] = [];
+    const reusedRows: StoredVector[] = [];
+    const toRead: WalkEntry[] = [];
+    for (const e of entries) {
+      const saved = savedByPath.get(e.path);
+      const ext = path.extname(e.path).toLowerCase();
+      const unchanged =
+        saved !== undefined && saved.size === e.size && saved.mtimeMs === e.mtimeMs;
+      const needsRechunk = !chunkOk && ext === '.pdf';
+      if (unchanged && !needsRechunk) {
+        keywordFiles.push(saved);
+        counts.reused = (counts.reused ?? 0) + 1;
+        const rows = storedRowsByPath.get(e.path);
+        if (rows) reusedRows.push(...rows);
+      } else {
+        toRead.push(e);
+      }
+    }
+
+    // -- phase 1: read the changed files ----------------------------
+    const newChunks: {
       id: string;
       path: string;
       name: string;
       folder: string;
       chunk: number;
       text: string;
-      vector: Float32Array;
     }[] = [];
-    let vectorOk = false;
+    const readBase = keywordFiles.length;
+    for (let i = 0; i < toRead.length; i++) {
+      const entry = toRead[i];
+      const name = path.basename(entry.path);
+      const folder = path.dirname(entry.path);
+      const ext = path.extname(entry.path).toLowerCase();
+      this.progress('read', readBase + i + 1, total, `Reading ${name}`);
+      // Let the window answer while a long build runs — without
+      // this the per-file loop is one unbroken stretch of work and
+      // Windows flags the window "(Not Responding)".
+      await this.yieldSometimes();
+      let content;
+      try {
+        content = await withTimeout(
+          readFileContent(entry.path),
+          READ_TIMEOUT_MS,
+        );
+      } catch {
+        counts.errors += 1;
+        if ((counts.skippedNames?.length ?? 0) < SKIPPED_NAMES_MAX) {
+          counts.skippedNames?.push(name);
+        }
+        console.log(`DJ: skipped ${name} (too slow to read)`);
+        continue;
+      }
+      if (content.status === 'unreadable') {
+        counts.errors += 1;
+        if ((counts.skippedNames?.length ?? 0) < SKIPPED_NAMES_MAX) {
+          counts.skippedNames?.push(name);
+        }
+        console.log(`DJ: skipped ${name} (could not be read)`);
+        continue;
+      }
+      if (content.status === 'no-text' || content.status === 'encrypted') {
+        // Indexed by name, with an honest note — a scanned PDF is
+        // still findable, and the result says why it has no text.
+        counts.files += 1;
+        counts.new = (counts.new ?? 0) + 1;
+        keywordFiles.push({
+          path: entry.path,
+          name,
+          folder,
+          text: '',
+          size: entry.size,
+          mtimeMs: entry.mtimeMs,
+          note: noTextNote(entry.path, content.status),
+        });
+        continue;
+      }
+      const text = content.text;
+      if (!text.trim()) {
+        counts.skipped += 1;
+        continue;
+      }
+      counts.files += 1;
+      counts.new = (counts.new ?? 0) + 1;
+      keywordFiles.push({
+        path: entry.path,
+        name,
+        folder,
+        text: text.slice(0, KEYWORD_TEXT_LIMIT),
+        size: entry.size,
+        mtimeMs: entry.mtimeMs,
+      });
+      // PDFs chunk page by page; everything else chunks by words.
+      const chunks = ext === '.pdf' ? chunkPdfText(text) : chunkText(text);
+      const fid = fileId(entry.path);
+      for (let j = 0; j < chunks.length; j++) {
+        newChunks.push({
+          id: `${fid}-${j}`,
+          path: entry.path,
+          name,
+          folder,
+          chunk: j,
+          text: chunks[j],
+        });
+      }
+    }
 
-    const keywordFiles: IndexedFile[] = [];
+    // Save the keyword index NOW, before embedding: keyword search
+    // works from this moment, even if the model takes minutes.
+    const foldersFound = await this.iterFolders(folders);
+    counts.folders = foldersFound.length;
+    this.keywordFiles = keywordFiles;
+    this.keywordFolders = foldersFound;
+    this.keywordRepo.save({ version: 1, files: keywordFiles, folders: foldersFound });
+    counts.files = keywordFiles.length;
+    this.progress(
+      'read',
+      total,
+      total,
+      `Keyword search ready: ${keywordFiles.length} files. Embedding ${newChunks.length} new chunks...`,
+    );
+
+    // -- phase 2: embed only the new chunks, in small batches ------
+    const newRows: StoredVector[] = [];
     let batchTexts: string[] = [];
-    let batchMetas: { id: string; path: string; name: string; folder: string; chunk: number; text: string }[] = [];
+    let batchMetas: {
+      id: string;
+      path: string;
+      name: string;
+      folder: string;
+      chunk: number;
+      text: string;
+    }[] = [];
 
     const flushBatch = async (): Promise<void> => {
       if (batchTexts.length === 0) return;
@@ -359,74 +588,40 @@ export class IndexService {
       batchMetas = [];
       const vecs = await this.embedder.embedTexts(texts, false);
       if (vecs && vecs.length === texts.length) {
-        vectorOk = true;
         texts.forEach((text, i) => {
-          counts.embedded += 1;
           newRows.push({ ...metas[i], text, vector: Float32Array.from(vecs[i]) });
         });
       } else {
         counts.keywordOnly += texts.length;
       }
+      // Yield after every batch: the model runs in the renderer,
+      // and small batches keep the window answering between them.
+      await this.yieldSometimes();
     };
 
-    for (let i = 0; i < files.length; i++) {
-      const filePath = files[i];
-      const name = path.basename(filePath);
-      this.progress('read', i + 1, total, `Reading ${name}`);
-      // Let the window answer while a long build runs — without
-      // this the per-file loop is one unbroken stretch of work and
-      // Windows flags the window "(Not Responding)".
-      await this.yieldSometimes();
-      let text = '';
-      try {
-        text = await readText(filePath);
-      } catch {
-        counts.errors += 1;
-        continue;
-      }
-      if (!text.trim()) {
-        counts.skipped += 1;
-        continue;
-      }
-      counts.files += 1;
-      keywordFiles.push({
-        path: filePath,
-        name,
-        folder: path.dirname(filePath),
-        text: text.slice(0, KEYWORD_TEXT_LIMIT),
-      });
-      const chunks = chunkText(text);
-      counts.chunks += chunks.length;
-      const fid = fileId(filePath);
-      for (let j = 0; j < chunks.length; j++) {
-        batchTexts.push(chunks[j]);
-        batchMetas.push({
-          id: `${fid}-${j}`,
-          path: filePath,
-          name,
-          folder: path.dirname(filePath),
-          chunk: j,
-          text: chunks[j],
-        });
-        // Flush in sequence when the batch is full: keeps memory
-        // low and the progress bar honest.
-        if (batchTexts.length >= EMBED_BATCH) {
-          await flushBatch();
-        }
+    for (let i = 0; i < newChunks.length; i++) {
+      batchTexts.push(newChunks[i].text);
+      batchMetas.push(newChunks[i]);
+      if (batchTexts.length >= EMBED_BATCH) {
+        await flushBatch();
+        this.progress(
+          'read',
+          readBase + toRead.length,
+          total,
+          `Embedding new chunks... ${newRows.length + reusedRows.length} with meaning search`,
+        );
       }
     }
     await flushBatch();
 
-    // Save the keyword index, with the folder list beside it.
-    const foldersFound = await this.iterFolders(folders);
-    counts.folders = foldersFound.length;
-    this.keywordFiles = keywordFiles;
-    this.keywordFolders = foldersFound;
-    this.keywordRepo.save({ version: 1, files: keywordFiles, folders: foldersFound });
-
-    // Save vectors only when the build produced them.
-    if (vectorOk && newRows.length > 0) {
-      this.store.replace(newRows, 'Xenova/nomic-embed-text-v1.5');
+    // Save vectors: reused rows plus the new ones. When the
+    // embedder was down, reused rows are still kept — the build
+    // never wipes good vectors because the model was off.
+    counts.chunks = reusedRows.length + newChunks.length;
+    counts.embedded = reusedRows.length + newRows.length;
+    const allRows = [...reusedRows, ...newRows];
+    if (allRows.length > 0) {
+      this.store.replace(allRows, 'Xenova/nomic-embed-text-v1.5');
       this.vectorOk = true;
     } else {
       this.store.clear();
@@ -437,28 +632,98 @@ export class IndexService {
     counts.vectorOk = this.vectorOk;
     const mode = this.vectorOk ? 'ready' : 'not available, keyword search only';
     console.log(
-      `DJ: index built: ${counts.files} files, ${counts.folders} folders, ${counts.chunks} chunks in ${counts.seconds}s (meaning search ${mode})`,
+      `DJ: index built: ${counts.files} files (${counts.new} new, ${counts.reused} reused, ${counts.removed} removed), ` +
+        `${counts.folders} folders, ${counts.chunks} chunks in ${counts.seconds}s (meaning search ${mode})`,
     );
     this.progress(
       'done',
       total,
       total,
-      `Done: ${counts.files} files, ${counts.chunks} chunks in ${counts.seconds}s.`,
+      `Done: ${counts.files} files (${counts.new} new, ${counts.reused} reused, ${counts.removed} removed), ${counts.chunks} chunks in ${counts.seconds}s.`,
     );
     return counts;
   }
 
   // -- search -------------------------------------------------------------
 
-  /** Search by meaning first, by keyword if vectors are not ready. */
+  /**
+   * Search, keyword first. Keyword matching is instant, and a file
+   * whose NAME matches the query is what the user typed — it wins
+   * outright, without waiting on the model. That matters for files
+   * with no readable text (a scanned PDF has no chunks and no
+   * vectors, so only its name can ever find it): a weak meaning
+   * match must not hide it. Otherwise, when the model is ready,
+   * meaning search runs and its hits merge with the keyword hits
+   * (meaning first, keyword extras after, no duplicates). When the
+   * model is NOT ready, the search does not wait for it at all —
+   * keyword results answer at once, with a plain note saying
+   * meaning search is still loading or unavailable. A search never
+   * waits the 5-minute build timeout, nor the 8-second query one,
+   * when the model is not ready.
+   */
   async search(query: string, topN = 8): Promise<SearchResult[]> {
     const q = (query || '').trim();
     if (!q) return [];
-    if (this.vectorOk) {
-      const results = await this.vectorSearch(q, topN);
-      if (results.length > 0) return results;
+    const kw = this.keywordSearch(q, topN);
+    if (this.nameMatches(q, kw)) {
+      this.lastMeaning = 'ready';
+      return kw;
     }
-    return this.keywordSearch(q, topN);
+    if (this.vectorOk && this.embedder.isReady()) {
+      const vec = await this.vectorSearch(q, topN);
+      if (vec.length > 0) {
+        this.lastMeaning = 'ready';
+        return this.mergeResults(vec, kw, topN);
+      }
+      // Meaning ran and found nothing: keyword answers, no note.
+      this.lastMeaning = 'ready';
+      return kw;
+    }
+    // Model not ready: keyword answers at once, and says so.
+    this.lastMeaning = !this.vectorOk
+      ? 'not-indexed'
+      : this.embedder.state === 'unavailable'
+        ? 'unavailable'
+        : 'loading';
+    const note =
+      this.lastMeaning === 'loading' ? MEANING_LOADING_NOTE : MEANING_UNAVAILABLE_NOTE;
+    return this.withMeaningNote(kw, note);
+  }
+
+  /** True when any keyword result matched by file NAME (not just
+   *  by text inside the file). Same term split as keywordSearch. */
+  private nameMatches(query: string, results: SearchResult[]): boolean {
+    const terms = query
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length > 2);
+    const words = terms.length > 0 ? terms : [query.toLowerCase()];
+    return results.some((r) =>
+      words.some((w) => r.name.toLowerCase().includes(w)),
+    );
+  }
+
+  /** Meaning hits first, then keyword-only extras, no duplicates. */
+  private mergeResults(vec: SearchResult[], kw: SearchResult[], topN: number): SearchResult[] {
+    const seen = new Set(vec.map((r) => r.path));
+    const out = [...vec];
+    for (const r of kw) {
+      if (out.length >= topN) break;
+      if (seen.has(r.path)) continue;
+      seen.add(r.path);
+      out.push(r);
+    }
+    return out;
+  }
+
+  /** Attach a plain note to keyword results (a file's own note,
+   *  e.g. a scanned PDF, is kept and the meaning note is added
+   *  after it). Same wording as chatService.meaningNote. */
+  private withMeaningNote(results: SearchResult[], note: string): SearchResult[] {
+    return results.map((r) => ({
+      ...r,
+      note: r.note ? `${r.note} ${note}` : note,
+    }));
   }
 
   private async vectorSearch(query: string, topN: number): Promise<SearchResult[]> {
@@ -506,8 +771,11 @@ export class IndexService {
       path: entry.path,
       name: entry.name,
       folder: entry.folder,
-      snippet: snippet(entry.text, query),
+      // A file with no readable text (scanned PDF) still shows
+      // its honest note instead of an empty snippet.
+      snippet: entry.text ? snippet(entry.text, query) : (entry.note ?? ''),
       score,
+      note: entry.note,
       ...statMeta(entry.path),
     }));
   }

@@ -162,6 +162,9 @@ export default function App() {
       pushDjText(
         `Index built: ${counts.files} files, ${counts.folders} folders, ${counts.embedded} with meaning search, ` +
           `${counts.keywordOnly} keyword only` +
+          (counts.new ? `, ${counts.new} new` : '') +
+          (counts.reused ? `, ${counts.reused} reused` : '') +
+          (counts.removed ? `, ${counts.removed} removed` : '') +
           (counts.skipped > 0 ? `, ${counts.skipped} skipped` : '') +
           (counts.errors > 0 ? `, ${counts.errors} errors` : '') +
           `. Took ${counts.seconds}s.`,

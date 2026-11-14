@@ -7,6 +7,7 @@
 
 import type { StoredVector } from '../domain/types';
 import { VectorRepository } from '../repositories/vectorRepository';
+import { CHUNK_VERSION } from '../utils/text';
 
 export interface VectorHit {
   id: string;
@@ -40,13 +41,24 @@ export class VectorStore {
     const loaded = this.repo.load();
     if (!loaded) {
       this.rows = [];
+      this.storedChunkVersion = 0;
       return false;
     }
     this.rows = loaded.metas.map((m, i) => ({
       ...m,
       vector: loaded.vectors[i],
     }));
+    this.storedChunkVersion = loaded.chunkVersion;
     return this.rows.length > 0;
+  }
+
+  /** Chunking scheme the loaded rows were built with (0 = old store). */
+  storedChunkVersion = 0;
+
+  /** A copy of the stored rows, for incremental rebuilds (reuse the
+   *  vectors of files that have not changed). */
+  getRows(): StoredVector[] {
+    return this.rows.map((r) => ({ ...r, vector: r.vector.slice() }));
   }
 
   get size(): number {
@@ -56,6 +68,7 @@ export class VectorStore {
   /** Replace the store with new rows (normalized) and persist them. */
   replace(rows: StoredVector[], embedModel: string): void {
     this.rows = rows.map((r) => ({ ...r, vector: normalize(r.vector) }));
+    this.storedChunkVersion = CHUNK_VERSION;
     this.repo.save(
       this.rows.map(({ id, path, name, folder, chunk, text }) => ({
         id,

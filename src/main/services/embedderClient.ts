@@ -30,6 +30,13 @@ export const QUERY_PREFIX = 'search_query: ';
 // stays loaded in memory.
 const EMBED_TIMEOUT_MS = 300_000;
 
+// How long a SEARCH waits for the model. A search must never sit
+// on the 5-minute build timeout: if the model is not ready within
+// 8 seconds, the search answers with keyword results at once and
+// says plainly that meaning search is still loading. The model
+// keeps loading in the background for the next search.
+const QUERY_TIMEOUT_MS = 8_000;
+
 export type EmbedderState = 'ready' | 'loading' | 'unavailable' | 'not-started';
 
 export class EmbedderClient {
@@ -85,8 +92,19 @@ export class EmbedderClient {
     }
   }
 
-  /** Embed texts. Returns vectors, or null when unavailable. */
-  embedTexts(texts: string[], forQuery = false): Promise<number[][] | null> {
+  /** True when the model has loaded and can embed right now. */
+  isReady(): boolean {
+    return this.state === 'ready';
+  }
+
+  /** Embed texts. Returns vectors, or null when unavailable.
+   *  timeoutMs caps how long this one call may wait (build flushes
+   *  allow the long first-load window; searches use the short one). */
+  embedTexts(
+    texts: string[],
+    forQuery = false,
+    timeoutMs: number = EMBED_TIMEOUT_MS,
+  ): Promise<number[][] | null> {
     if (texts.length === 0) return Promise.resolve([]);
     const prefix = forQuery ? QUERY_PREFIX : DOC_PREFIX;
     const sendTexts = texts.map((t) => prefix + t);
@@ -94,9 +112,12 @@ export class EmbedderClient {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        this.state = 'unavailable';
+        // A timed-out search must not poison the embedder: the
+        // model may still be loading. Only a build flush that
+        // waited the full window marks it unavailable.
+        if (!forQuery) this.state = 'unavailable';
         resolve(null);
-      }, EMBED_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, { resolve, timer });
       if (this.state === 'not-started') this.state = 'loading';
       const sent = this.sendRequest({ id, texts: sendTexts, forQuery });
@@ -109,9 +130,10 @@ export class EmbedderClient {
     });
   }
 
-  /** Embed one search query. Returns one vector, or null. */
+  /** Embed one search query. Returns one vector, or null — fast:
+   *  at most QUERY_TIMEOUT_MS, never the 5-minute build window. */
   async embedQuery(query: string): Promise<number[] | null> {
-    const vecs = await this.embedTexts([query], true);
+    const vecs = await this.embedTexts([query], true, QUERY_TIMEOUT_MS);
     return vecs && vecs.length > 0 ? vecs[0] : null;
   }
 }

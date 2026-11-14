@@ -10,6 +10,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { CHUNK_VERSION } from '../utils/text';
+
 export const VECTOR_DIM = 768;
 export const EMBED_FORMAT_VERSION = 2;
 // Format 1: raw text, no prefixes. Format 2: nomic task prefixes.
@@ -27,6 +29,9 @@ export interface VectorMetaFile {
   embedFormat: number;
   embedModel: string;
   dim: number;
+  /** Chunking scheme the stored rows were built with (v5.5+;
+   *  missing in older stores, which count as version 0). */
+  chunkVersion?: number;
   vectors: VectorMeta[];
 }
 
@@ -54,7 +59,7 @@ export class VectorRepository {
   }
 
   /** Load all vectors. Returns null when nothing is stored. */
-  load(): { metas: VectorMeta[]; vectors: Float32Array[] } | null {
+  load(): { metas: VectorMeta[]; vectors: Float32Array[]; chunkVersion: number } | null {
     try {
       if (!this.exists()) return null;
       const meta = JSON.parse(
@@ -72,7 +77,10 @@ export class VectorRepository {
       for (let i = 0; i < meta.vectors.length; i++) {
         vectors.push(floats.slice(i * VECTOR_DIM, (i + 1) * VECTOR_DIM));
       }
-      return { metas: meta.vectors, vectors };
+      // Older stores have no chunkVersion — they count as 0.
+      const chunkVersion =
+        typeof meta.chunkVersion === 'number' ? meta.chunkVersion : 0;
+      return { metas: meta.vectors, vectors, chunkVersion };
     } catch {
       return null;
     }
@@ -88,12 +96,17 @@ export class VectorRepository {
       embedFormat: EMBED_FORMAT_VERSION,
       embedModel,
       dim: VECTOR_DIM,
+      chunkVersion: CHUNK_VERSION,
       vectors: metas,
     };
     fs.writeFileSync(this.metaPath(), JSON.stringify(meta), 'utf-8');
     fs.writeFileSync(
       this.indexMetaPath(),
-      JSON.stringify({ embedFormat: EMBED_FORMAT_VERSION, embedModel }),
+      JSON.stringify({
+        embedFormat: EMBED_FORMAT_VERSION,
+        embedModel,
+        chunkVersion: CHUNK_VERSION,
+      }),
       'utf-8',
     );
   }
@@ -118,6 +131,19 @@ export class VectorRepository {
       return typeof meta.embedFormat === 'number' ? meta.embedFormat : null;
     } catch {
       return null;
+    }
+  }
+
+  /** The chunking scheme the stored vectors were built with
+   *  (0 when the store predates chunk versions). */
+  storedChunkVersion(): number {
+    try {
+      const meta = JSON.parse(
+        fs.readFileSync(this.indexMetaPath(), 'utf-8'),
+      ) as { chunkVersion?: number };
+      return typeof meta.chunkVersion === 'number' ? meta.chunkVersion : 0;
+    } catch {
+      return 0;
     }
   }
 }

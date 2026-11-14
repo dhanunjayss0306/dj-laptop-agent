@@ -77,6 +77,9 @@ export interface SearchResult {
   size?: number;
   /** Last-modified date as an ISO string — when known. */
   mtime?: string;
+  /** Plain-language note when the file has no readable text
+   *  (scanned PDF, locked PDF) — shown with the result. */
+  note?: string;
 }
 
 /** A folder DJ knows about (recorded at index time, by name). */
@@ -273,6 +276,14 @@ export interface IndexCounts {
   errors: number;
   seconds: number;
   vectorOk: boolean;
+  /** Files unchanged since the last build — chunks/vectors reused. */
+  reused?: number;
+  /** Files read fresh this build (not reused). */
+  new?: number;
+  /** Files in the old index that are gone now. */
+  removed?: number;
+  /** Names of files skipped as unreadable or too slow (first 20). */
+  skippedNames?: string[];
 }
 
 export interface EmbedRequest {

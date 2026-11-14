@@ -59,6 +59,7 @@
     "@huggingface/transformers": "^3.7.0",
     "@stylexjs/stylex": "^0.19.0",
     "electron-updater": "^6.8.11",
+    "jszip": "^3.10.2",
     "mammoth": "^1.8.0",
     "pdf-parse": "^1.1.1",
     "react": "^19.0.0",
@@ -96,5 +97,5 @@
     "test:watch": "vitest",
     "prebuild": "node scripts/copy-ort.mjs"
   },
-  "version": "5.4.0"
+  "version": "5.5.0"
 }

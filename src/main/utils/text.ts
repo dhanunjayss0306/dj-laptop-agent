@@ -5,6 +5,15 @@
 export const CHUNK_WORDS = 400;
 export const OVERLAP_WORDS = 50;
 
+/**
+ * Chunking scheme version, stored beside the vectors. When the
+ * chunking rules change, stored vectors built with the old rules
+ * must not be reused for the files whose chunking changed (PDFs
+ * became page-aware in v5.5). Bump this when chunkText or
+ * chunkPdfText changes shape.
+ */
+export const CHUNK_VERSION = 1;
+
 /** Split text into overlapping word chunks. */
 export function chunkText(text: string): string[] {
   const words = text.split(/\s+/).filter(Boolean);
@@ -17,6 +26,27 @@ export function chunkText(text: string): string[] {
     if (end >= words.length) break;
     start = end - OVERLAP_WORDS;
   }
+  return chunks;
+}
+
+/**
+ * Split PDF text into page-aware chunks. pdf-parse marks page
+ * breaks with a form feed (\f), so each page is chunked on its
+ * own and tagged with its page number ("[page 3] ...") — a search
+ * hit then says which page it came from, and a sentence never
+ * straddles two pages. Pages with no text are skipped. Text
+ * without page marks falls back to plain chunkText.
+ */
+export function chunkPdfText(text: string): string[] {
+  const pages = text.split('\f');
+  if (pages.length <= 1) return chunkText(text);
+  const chunks: string[] = [];
+  pages.forEach((page, i) => {
+    if (!page.trim()) return;
+    for (const c of chunkText(page)) {
+      chunks.push(`[page ${i + 1}] ${c}`);
+    }
+  });
   return chunks;
 }
 

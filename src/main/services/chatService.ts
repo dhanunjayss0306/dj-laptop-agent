@@ -46,14 +46,17 @@ export class ChatService {
           return {
             kind: 'message',
             text:
-              `I could not find anything about '${query}' in your folders.\n\n` +
-              'Try different words, or click Rebuild index if you added files recently.\n\n' +
+              `I could not find anything about '${query}' in your folders.` +
+              this.meaningNote() +
+              '\n\nTry different words, or click Rebuild index if you added files recently.\n\n' +
               HELP_TEXT,
           };
         }
         return {
           kind: 'search',
-          text: `I found ${results.length} file(s) about '${query}'. Click Open on any of them.`,
+          text:
+            `I found ${results.length} file(s) about '${query}'. Click Open on any of them.` +
+            this.meaningNote(),
           results,
         };
       }
@@ -197,6 +200,20 @@ export class ChatService {
       default:
         return { kind: 'help', text: HELP_TEXT };
     }
+  }
+
+  /** Plain words for the last search's meaning state (v5.5): when
+   *  the model was still loading or unavailable, results are
+   *  keyword-only, and the user is told so instead of wondering
+   *  why "about" matches look thin. */
+  private meaningNote(): string {
+    if (this.indexer.lastMeaning === 'loading') {
+      return '\n\nMeaning search is still loading — these are keyword matches for now.';
+    }
+    if (this.indexer.lastMeaning === 'unavailable') {
+      return '\n\nMeaning search is unavailable right now — these are keyword matches.';
+    }
+    return '';
   }
 
   /** Plan an organize for a range (used by chat and by the UI). */
