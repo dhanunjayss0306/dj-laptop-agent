@@ -78,16 +78,26 @@ export default function App() {
 
   // Startup: subscribe to index progress and update status, load
   // status/config, and open setup on first run (no index yet).
+  // Guarded: if the built preload (dist) is older than this renderer
+  // and lacks a subscription, the app must still load instead of
+  // crashing to a blank screen. Run `npm run build` to refresh dist.
   useEffect(() => {
-    const unsubscribeProgress = window.dj.onIndexProgress((p) => {
-      setProgress(p);
-      if (p.stage === 'done') {
-        setBuilding(false);
-      }
-    });
-    const unsubscribeUpdate = window.dj.onUpdateStatus((s) => {
-      setUpdate(s);
-    });
+    const noop = (): void => {};
+    const unsubscribeProgress =
+      typeof window.dj.onIndexProgress === 'function'
+        ? window.dj.onIndexProgress((p) => {
+            setProgress(p);
+            if (p.stage === 'done') {
+              setBuilding(false);
+            }
+          })
+        : noop;
+    const unsubscribeUpdate =
+      typeof window.dj.onUpdateStatus === 'function'
+        ? window.dj.onUpdateStatus((s) => {
+            setUpdate(s);
+          })
+        : noop;
     void (async () => {
       const s = await refreshStatus();
       if (s && !s.hasIndex) {
