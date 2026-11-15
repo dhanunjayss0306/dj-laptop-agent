@@ -32,6 +32,15 @@ const api: DjApi = {
   openFolder: (folderPath) => ipcRenderer.invoke(IPC.openFolder, folderPath),
   getSystemStats: () => ipcRenderer.invoke(IPC.getSystemStats),
   getMemory: () => ipcRenderer.invoke(IPC.getMemory),
+  setStartAtLogin: (enabled) => ipcRenderer.invoke(IPC.setStartAtLogin, enabled),
+
+  onTrayHidden: (cb) => {
+    const listener = (): void => cb();
+    ipcRenderer.on(IPC.trayHidden, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.trayHidden, listener);
+    };
+  },
 
   onIndexProgress: (cb) => {
     const listener = (_e: IpcRendererEvent, p: IndexProgress): void => cb(p);

@@ -18,6 +18,10 @@
       {
         "from": "resources/models",
         "to": "models"
+      },
+      {
+        "from": "assets/icon.ico",
+        "to": "tray-icon.ico"
       }
     ],
     "files": [
@@ -97,5 +101,5 @@
     "test:watch": "vitest",
     "prebuild": "node scripts/copy-ort.mjs"
   },
-  "version": "5.5.0"
+  "version": "5.6.0"
 }

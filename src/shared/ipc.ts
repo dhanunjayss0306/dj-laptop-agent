@@ -59,6 +59,10 @@ export const IPC = {
   getSystemStats: 'dj:get-system-stats',
   /** Renderer -> main: the v5.3 memory files, read-only, for the Memory page. */
   getMemory: 'dj:get-memory',
+  /** Renderer -> main: set "start DJ when Windows starts" (v5.6). */
+  setStartAtLogin: 'dj:set-start-at-login',
+  /** Main -> renderer: the window was just hidden into the tray (v5.6). */
+  trayHidden: 'dj:tray-hidden',
 } as const;
 
 /** The typed API the preload script exposes as window.dj. */
@@ -109,6 +113,12 @@ export interface DjApi {
   getSystemStats(): Promise<SystemStats>;
   /** The v5.3 memory files, read-only. */
   getMemory(): Promise<MemoryContent>;
+  /** v5.6: set "start DJ when Windows starts". Returns the value
+   *  now in effect. */
+  setStartAtLogin(enabled: boolean): Promise<boolean>;
+  /** v5.6: the window was just hidden into the tray. Returns an
+   *  unsubscribe function. */
+  onTrayHidden(cb: () => void): () => void;
 }
 
 declare global {

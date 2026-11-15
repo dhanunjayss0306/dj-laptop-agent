@@ -43,6 +43,10 @@ export interface ControllerContext {
   capability: CapabilityManager;
   /** DJ's data folder (memory files live here). */
   dataDir: string;
+  /** v5.6: apply "start at login" in the OS (main process only). */
+  applyStartAtLogin: (enabled: boolean) => void;
+  /** v5.6: effective start-at-login + whether a tray exists. */
+  getTrayInfo: () => { startAtLogin: boolean; hasTray: boolean };
 }
 
 export function registerIpc(ctx: ControllerContext): void {
@@ -56,6 +60,7 @@ export function registerIpc(ctx: ControllerContext): void {
   ipcMain.handle(IPC.getStatus, async (): Promise<DjStatus> => {
     const config = configRepo.load();
     const { filesIndexed, foldersIndexed, vectorOk } = indexer.status();
+    const trayInfo = ctx.getTrayInfo();
     return {
       filesIndexed,
       foldersIndexed,
@@ -68,6 +73,9 @@ export function registerIpc(ctx: ControllerContext): void {
       // v5.3: which layer is active and why. A dead model or an
       // expired key shows here as "Core only: ...", plainly.
       capability: await capability.resolve(),
+      // v5.6: effective start-at-login and whether a tray exists.
+      startAtLogin: trayInfo.startAtLogin,
+      hasTray: trayInfo.hasTray,
     };
   });
 
@@ -81,6 +89,15 @@ export function registerIpc(ctx: ControllerContext): void {
   ipcMain.handle(IPC.saveConfig, (_e, config: AppConfig): AppConfig => {
     configRepo.save(config);
     return configRepo.load();
+  });
+
+  // v5.6: "start DJ when Windows starts". Persists the choice and
+  // applies it in the OS; returns the value now in effect.
+  ipcMain.handle(IPC.setStartAtLogin, (_e, enabled: boolean): boolean => {
+    const config = configRepo.load();
+    configRepo.save({ ...config, startAtLogin: enabled });
+    ctx.applyStartAtLogin(enabled);
+    return enabled;
   });
 
   // -- index ------------------------------------------------------------

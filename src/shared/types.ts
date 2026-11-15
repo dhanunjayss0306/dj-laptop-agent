@@ -15,6 +15,12 @@ export interface AppConfig {
    *  only, in dj_config.json — it is never sent anywhere except to
    *  the provider the user picked. Leave it out and DJ runs fine. */
   cloud?: { provider: 'openai' | 'openrouter' | 'anthropic'; apiKey?: string };
+  /** v5.6: start DJ when Windows starts. Undefined means the
+   *  default: on in the packaged app, off in dev. */
+  startAtLogin?: boolean;
+  /** v5.6: the "keeps running in the tray" note was already shown
+   *  once, so it is not shown again. */
+  trayNoteSeen?: boolean;
 }
 
 // --- DJ v5.3: three capability layers ------------------------------------
@@ -139,6 +145,11 @@ export interface DjStatus {
   config: AppConfig;
   /** v5.3: which capability layer is active and why. */
   capability: CapabilityStatus;
+  /** v5.6: effective "start at login" (saved choice, or the
+   *  packaged-app default when nothing is saved). */
+  startAtLogin: boolean;
+  /** v5.6: true when the app has a system tray to hide into. */
+  hasTray: boolean;
 }
 
 export interface OrganizeMove {

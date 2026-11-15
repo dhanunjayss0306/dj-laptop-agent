@@ -4,6 +4,7 @@
 
 import { Button } from '@astryxdesign/core/Button';
 import { Card } from '@astryxdesign/core/Card';
+import { Switch } from '@astryxdesign/core/Switch';
 
 import type { AppConfig, DjStatus } from '../../shared/types';
 import { capabilityBadge } from '../pages';
@@ -12,6 +13,9 @@ import { getEmbedderSource, getEmbedderState } from '../embedder';
 interface SettingsPageProps {
   status: DjStatus | null;
   config: AppConfig | null;
+  /** v5.6: effective "start at login" value. */
+  startAtLogin: boolean;
+  onToggleStartAtLogin: (enabled: boolean) => void;
   onOpenFolders: () => void;
   onRebuildIndex: () => void;
   onRefreshStatus: () => void;
@@ -20,6 +24,8 @@ interface SettingsPageProps {
 export function SettingsPage({
   status,
   config,
+  startAtLogin,
+  onToggleStartAtLogin,
   onOpenFolders,
   onRebuildIndex,
   onRefreshStatus,
@@ -67,6 +73,23 @@ export function SettingsPage({
           <div className="dj-stat-actions">
             <Button label="Refresh status" variant="secondary" size="sm" onClick={onRefreshStatus} />
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="dj-stat-card">
+          <div className="dj-stat-title">Always running</div>
+          <Switch
+            label="Start DJ when Windows starts"
+            description="DJ opens on its own when you sign in, and keeps running in the tray when you close its window."
+            value={startAtLogin}
+            onChange={(checked) => onToggleStartAtLogin(checked)}
+          />
+          {status?.hasTray ? (
+            <p className="dj-stat-text">
+              To fully quit DJ, right-click the tray icon and choose Quit DJ.
+            </p>
+          ) : null}
         </div>
       </Card>
 

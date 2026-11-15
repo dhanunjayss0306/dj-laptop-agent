@@ -3,7 +3,7 @@
 // server, nothing leaves the laptop.
 
 import * as path from 'path';
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, Menu, type Tray } from 'electron';
 
 import { ConfigRepository } from './config';
 import { registerIpc } from './ipc/ipcControllers';
@@ -32,8 +32,24 @@ import {
 import { defaultPrimitives, TraceStore } from './v53/primitives';
 import { Heartbeat, MemoryFiles } from './v53/agentLoop';
 import type { CloudHealth, LocalModelHealth } from '../shared/types';
+// DJ v5.6 — always-running app: system tray + start at login.
+import {
+  buildLoginItemSettings,
+  createTray,
+  decideCloseAction,
+  pickExistingIcon,
+  resolveStartAtLogin,
+  showWindow,
+  trayIconCandidates,
+} from './services/tray';
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+// v5.6: the tray icon (null when there is none — closing the
+// window then quits, like before). isQuitting is set only by the
+// tray "Quit DJ" menu, so a window close never quits by accident.
+let tray: Tray | null = null;
+let isQuitting = false;
 
 // The bundled model is served on a private scheme — privileges must
 // be registered before the app is ready.
@@ -74,8 +90,39 @@ function createWindow(): BrowserWindow {
   win.on('closed', () => {
     mainWindow = null;
   });
+
+  // v5.6: closing the window hides DJ into the tray instead of
+  // quitting, so it keeps running. Only the tray "Quit DJ" menu
+  // (or a real quit) closes the app for good.
+  win.on('close', (event) => {
+    if (decideCloseAction({ hasTray: tray !== null, isQuitting }) === 'hide') {
+      event.preventDefault();
+      win.hide();
+      notifyTrayHiddenOnce(win);
+    }
+  });
   return win;
 }
+
+/** First time the window hides into the tray: tell the (hidden)
+ *  renderer to show the note when the window opens again, and
+ *  remember it so the note appears only once. */
+function notifyTrayHiddenOnce(win: BrowserWindow): void {
+  if (!appConfigRepo) return;
+  try {
+    const config = appConfigRepo.load();
+    if (config.trayNoteSeen) return;
+    appConfigRepo.save({ ...config, trayNoteSeen: true });
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.trayHidden);
+    }
+  } catch {
+    // The note is a nicety — never break hiding for it.
+  }
+}
+
+// Set by main() before the first window is created.
+let appConfigRepo: ConfigRepository | null = null;
 
 // -- DJ v5.3 layer probes (main process only) -------------------------
 // Layer 1: ask Ollama, then LM Studio, whether a model is up. Each
@@ -166,6 +213,17 @@ async function main(): Promise<void> {
 
   const dataDir = getDataDir();
   const configRepo = new ConfigRepository(dataDir);
+  appConfigRepo = configRepo;
+
+  // v5.6: start DJ when Windows starts. On in the packaged app
+  // unless the user turned it off; off in dev. Only the packaged
+  // app registers itself — in dev there is no installed exe to
+  // register.
+  if (app.isPackaged) {
+    app.setLoginItemSettings(
+      buildLoginItemSettings(resolveStartAtLogin(configRepo.load().startAtLogin, true)),
+    );
+  }
 
   // The embedder runs in the renderer (WASM ONNX). Main asks it
   // over IPC; this callback is how main sends the request.
@@ -214,9 +272,43 @@ async function main(): Promise<void> {
     duplicates,
     capability,
     dataDir,
+    // v5.6: the Settings toggle. Only the packaged app registers
+    // with Windows; in dev the choice is still saved.
+    applyStartAtLogin: (enabled: boolean) => {
+      if (app.isPackaged) {
+        app.setLoginItemSettings(buildLoginItemSettings(enabled));
+      }
+    },
+    getTrayInfo: () => ({
+      startAtLogin: resolveStartAtLogin(configRepo.load().startAtLogin, app.isPackaged),
+      hasTray: tray !== null,
+    }),
   });
 
   mainWindow = createWindow();
+
+  // v5.6: system tray. The icon ships with the installed app
+  // (resources/tray-icon.ico); in dev it is assets/icon.ico. If
+  // no icon is found the tray is skipped and closing the window
+  // quits, like before.
+  const iconPath = pickExistingIcon(
+    trayIconCandidates(process.resourcesPath, app.getAppPath()),
+  );
+  if (iconPath) {
+    tray = createTray(iconPath, {
+      onOpen: () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          mainWindow = createWindow();
+        } else {
+          showWindow(mainWindow);
+        }
+      },
+      onQuit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    });
+  }
 
   // v5.3 heartbeat (OpenClaw idea): every 30 minutes re-check the
   // layers. Only a CHANGE is noted — in the trace store and in
@@ -238,7 +330,12 @@ async function main(): Promise<void> {
     }
   });
   heartbeat.start();
-  app.on('before-quit', () => heartbeat.stop());
+  app.on('before-quit', () => {
+    heartbeat.stop();
+    // v5.6: remove the tray icon when the app really quits.
+    tray?.destroy();
+    tray = null;
+  });
 
   // Self-update from GitHub Releases (installed app only — in dev
   // the service stays idle, and in the Microsoft Store build it stays
@@ -257,13 +354,18 @@ async function main(): Promise<void> {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow();
+    } else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      // v5.6: the window is hidden in the tray — show it again.
+      showWindow(mainWindow);
     }
   });
 }
 
 app.on('window-all-closed', () => {
-  // On Windows, closing the window quits the app.
-  if (process.platform !== 'darwin') app.quit();
+  // On Windows, closing the window quits the app — but only when
+  // there is no tray to hide into (v5.6: with a tray, closing the
+  // window hides it and the app keeps running).
+  if (process.platform !== 'darwin' && tray === null) app.quit();
 });
 
 void main();

@@ -76,6 +76,8 @@ export default function App() {
   const [update, setUpdate] = useState<UpdateState | null>(null);
   const [page, setPage] = useState<PageId>('command');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // v5.6: shown once, when the window first hides into the tray.
+  const [trayNote, setTrayNote] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const toast = useToast();
 
@@ -123,6 +125,14 @@ export default function App() {
             setUpdate(s);
           })
         : noop;
+    // v5.6: the window just hid into the tray — show the note when
+    // the user opens it again.
+    const unsubscribeTrayHidden =
+      typeof window.dj.onTrayHidden === 'function'
+        ? window.dj.onTrayHidden(() => {
+            setTrayNote(true);
+          })
+        : noop;
     void (async () => {
       const s = await refreshStatus();
       if (s && !s.hasIndex) {
@@ -133,6 +143,7 @@ export default function App() {
     return () => {
       unsubscribeProgress();
       unsubscribeUpdate();
+      unsubscribeTrayHidden();
     };
   }, [refreshStatus]);
 
@@ -274,6 +285,20 @@ export default function App() {
     setFoldersOpen(true);
   }, []);
 
+  // v5.6: "Start DJ when Windows starts" toggle in Settings.
+  const handleToggleStartAtLogin = useCallback(
+    async (enabled: boolean) => {
+      try {
+        await window.dj.setStartAtLogin(enabled);
+      } catch (err) {
+        pushDjText(`Could not change the start setting: ${String(err)}`);
+        return;
+      }
+      await refreshStatus();
+    },
+    [pushDjText, refreshStatus],
+  );
+
   // Command palette: one static source for pages + actions. Picking
   // an item runs it — go to a page, or do the real action.
   const paletteSource = useMemo(
@@ -401,6 +426,18 @@ export default function App() {
           <div className="dj-update">{update.message}</div>
         ) : null}
 
+        {trayNote ? (
+          <div className="dj-update">
+            DJ keeps running in the tray. Right-click the tray icon to open or quit.
+            <Button
+              label="Dismiss"
+              variant="ghost"
+              size="sm"
+              onClick={() => setTrayNote(false)}
+            />
+          </div>
+        ) : null}
+
         {(building || (progress && progress.stage !== 'done')) && (
           <div className="dj-progress">
             {progress?.message ? (
@@ -500,6 +537,8 @@ export default function App() {
           <SettingsPage
             status={status}
             config={config}
+            startAtLogin={status?.startAtLogin ?? config?.startAtLogin ?? false}
+            onToggleStartAtLogin={(enabled) => void handleToggleStartAtLogin(enabled)}
             onOpenFolders={openFoldersDialog}
             onRebuildIndex={() => void runBuildIndex()}
             onRefreshStatus={() => void refreshStatus()}
