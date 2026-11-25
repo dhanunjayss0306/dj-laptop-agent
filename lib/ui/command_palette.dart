@@ -1,4 +1,4 @@
-// Command palette (Ctrl+K / Cmd+K anywhere): 15 commands, 10 pages +
+// Command palette (Ctrl+K / Cmd+K anywhere): 16 commands, 11 pages +
 // 5 actions. Filters as you type; empty result shows
 // "No matching page or action".
 import 'package:flutter/material.dart';
@@ -13,8 +13,8 @@ class PaletteActions {
     required this.refreshStatus,
   });
 
-  /// Page index 0-9: Command Center, Files, Duplicates, Organize,
-  /// System, Memory, Routines, Agent, Tools, Settings.
+  /// Page index 0-10: Command Center, Files, Duplicates, Organize,
+  /// System, Memory, Routines, Agent, Tools, Privacy Screen, Settings.
   final void Function(int page) goToPage;
   final VoidCallback rebuildIndex;
   final VoidCallback openFolders;
@@ -127,11 +127,18 @@ class _CommandPaletteDialogState extends State<_CommandPaletteDialog> {
       run: () => widget.actions.goToPage(8),
     ),
     _PaletteCommand(
+      title: 'Go to Privacy Screen',
+      group: 'Pages',
+      keywords: 'privacy screen webcam blackout shoulder',
+      icon: Icons.visibility_off,
+      run: () => widget.actions.goToPage(9),
+    ),
+    _PaletteCommand(
       title: 'Go to Settings',
       group: 'Pages',
       keywords: 'settings folders config',
       icon: Icons.settings,
-      run: () => widget.actions.goToPage(9),
+      run: () => widget.actions.goToPage(10),
     ),
     _PaletteCommand(
       title: 'Rebuild index',

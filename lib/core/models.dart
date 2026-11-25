@@ -50,6 +50,13 @@ class AppConfig {
   /// When true, DJ tries the local model before the cloud when
   /// answering questions. Null = cloud first (the default).
   final bool? preferLocal;
+  /// Privacy Screen sensitivity, 0.0 (lenient) to 1.0 (strict).
+  /// Null = 0.75 (the default).
+  final double? privacySensitivity;
+  /// Privacy Screen: warn about a second face in view. Null = true.
+  final bool? privacyDetectShoulderSurfers;
+  /// Privacy Screen: start protection when DJ starts. Null = false.
+  final bool? privacyStartOnLaunch;
   const AppConfig({
     required this.folders,
     this.localModel,
@@ -57,6 +64,9 @@ class AppConfig {
     this.startAtLogin,
     this.trayNoteSeen,
     this.preferLocal,
+    this.privacySensitivity,
+    this.privacyDetectShoulderSurfers,
+    this.privacyStartOnLaunch,
   });
   factory AppConfig.fromJson(Map<String, dynamic> j) => AppConfig(
         folders: (j['folders'] as List? ?? [])
@@ -72,6 +82,12 @@ class AppConfig {
         startAtLogin: j['startAtLogin'] as bool?,
         trayNoteSeen: j['trayNoteSeen'] as bool?,
         preferLocal: j['preferLocal'] as bool?,
+        privacySensitivity: j['privacySensitivity'] is num
+            ? (j['privacySensitivity'] as num).toDouble()
+            : null,
+        privacyDetectShoulderSurfers:
+            j['privacyDetectShoulderSurfers'] as bool?,
+        privacyStartOnLaunch: j['privacyStartOnLaunch'] as bool?,
       );
   Map<String, dynamic> toJson() => {
         'folders': folders.map((f) => f.toJson()).toList(),
@@ -80,6 +96,12 @@ class AppConfig {
         if (startAtLogin != null) 'startAtLogin': startAtLogin,
         if (trayNoteSeen != null) 'trayNoteSeen': trayNoteSeen,
         if (preferLocal != null) 'preferLocal': preferLocal,
+        if (privacySensitivity != null)
+          'privacySensitivity': privacySensitivity,
+        if (privacyDetectShoulderSurfers != null)
+          'privacyDetectShoulderSurfers': privacyDetectShoulderSurfers,
+        if (privacyStartOnLaunch != null)
+          'privacyStartOnLaunch': privacyStartOnLaunch,
       };
   AppConfig copyWith({
     List<FolderEntry>? folders,
@@ -88,6 +110,9 @@ class AppConfig {
     bool? startAtLogin,
     bool? trayNoteSeen,
     bool? preferLocal,
+    double? privacySensitivity,
+    bool? privacyDetectShoulderSurfers,
+    bool? privacyStartOnLaunch,
   }) =>
       AppConfig(
         folders: folders ?? this.folders,
@@ -96,6 +121,11 @@ class AppConfig {
         startAtLogin: startAtLogin ?? this.startAtLogin,
         trayNoteSeen: trayNoteSeen ?? this.trayNoteSeen,
         preferLocal: preferLocal ?? this.preferLocal,
+        privacySensitivity: privacySensitivity ?? this.privacySensitivity,
+        privacyDetectShoulderSurfers:
+            privacyDetectShoulderSurfers ?? this.privacyDetectShoulderSurfers,
+        privacyStartOnLaunch:
+            privacyStartOnLaunch ?? this.privacyStartOnLaunch,
       );
 }
 

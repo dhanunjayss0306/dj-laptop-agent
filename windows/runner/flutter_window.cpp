@@ -50,6 +50,10 @@ bool FlutterWindow::OnCreate() {
   // Win32Window::OnCreate gave the window a handle.
   hotkey_channel_ =
       std::make_unique<dj::DjHotkeyChannel>(messenger, GetHandle());
+  // Privacy Screen in-memory webcam capture (Media Foundation). The
+  // capture thread posts its reply message to this window; the message
+  // handler routes it in MessageHandler below.
+  RegisterDjCameraChannel(messenger, GetHandle());
 
   // DJ system tray. Created only when a tray-icon file exists
   // (dj_tray.cpp); otherwise closing the window quits the app.
@@ -76,6 +80,9 @@ void FlutterWindow::OnDestroy() {
   }
   // Hotkey first: its destructor unregisters the hotkey from the window.
   hotkey_channel_ = nullptr;
+  // Privacy camera: stop the capture thread before the engine is torn
+  // down, so no reply can arrive after the messenger is gone.
+  ShutdownDjCamera();
   voice_channel_ = nullptr;
   input_channel_ = nullptr;
   cursor_channel_ = nullptr;
@@ -113,6 +120,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   // when DJ is not focused; the channel notifies Dart ("onHotkeyPressed").
   if (hotkey_channel_ &&
       hotkey_channel_->HandleMessage(hwnd, message, wparam, lparam)) {
+    return 0;
+  }
+
+  // Privacy Screen camera replies. The capture thread posts
+  // kDjCameraDoneMessage when a method reply is ready; delivering it
+  // here (platform thread) hands the result back to Dart.
+  if (HandleDjCameraMessage(message)) {
     return 0;
   }
 

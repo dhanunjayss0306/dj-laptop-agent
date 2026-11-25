@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "dj_camera_channel.h"
 #include "dj_cursor_channel.h"
 #include "dj_hotkey.h"
 #include "dj_input_channel.h"
@@ -16,9 +17,11 @@
 #include "win32_window.h"
 
 // A window that hosts a Flutter view, plus DJ's native Windows services:
-// the six MethodChannels (system, screen, cursor, input, voice, hotkey)
-// and the system tray (hide-on-close while the tray exists, "Quit DJ" to
-// quit).
+// the seven MethodChannels (system, screen, cursor, input, voice, hotkey,
+// privacy camera) and the system tray (hide-on-close while the tray
+// exists, "Quit DJ" to quit). The privacy camera channel is function
+// based (see dj_camera_channel.h) rather than a member, because its
+// capture thread needs a plain window handle for its reply message.
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.

@@ -7,6 +7,7 @@ project(runner LANGUAGES CXX)
 #
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
+  "dj_camera_channel.cpp"
   "dj_cursor_channel.cpp"
   "dj_hotkey.cpp"
   "dj_input_channel.cpp"
@@ -43,10 +44,14 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # DJ native channels: shell32 (ShellExecuteW, SHFileOperationW,
 # SHGetKnownFolderPath), ole32 (IFileDialog COM), sapi (ISpVoice TTS),
-# winhttp (whisper-server inference POST), gdiplus (screenshot PNG encode).
+# winhttp (whisper-server inference POST), gdiplus (screenshot PNG encode),
+# mfplat/mf/mfreadwrite/mfuuid/shlwapi (Privacy Screen in-memory webcam
+# capture via Media Foundation).
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib"
                                              "sapi.lib" "winhttp.lib"
-                                             "gdiplus.lib")
+                                             "gdiplus.lib" "mfplat.lib"
+                                             "mf.lib" "mfreadwrite.lib"
+                                             "mfuuid.lib" "shlwapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

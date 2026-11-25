@@ -27,6 +27,7 @@ import '../core/worker_client.dart';
 import '../features/account/account.dart';
 import '../features/agent_mode.dart';
 import '../features/integrations/integrations.dart';
+import '../features/privacy_screen/privacy_screen_controller.dart';
 import '../features/routines.dart';
 import '../features/screen_qa.dart';
 import '../features/walkthrough.dart';
@@ -104,6 +105,28 @@ class DjAppState {
     );
     integrations = defaultRegistry(dataDir: dataDir, systemOps: systemOps);
     walkthroughEngine = WalkthroughEngine(cursor: cursorChannel);
+    // Privacy Screen (Windows only; on Android the page shows a
+    // laptop-only message and the controller never starts the camera).
+    // Settings changes are saved straight to dj_config.json without a
+    // status refresh — privacy settings do not appear in DjStatus.
+    privacyScreen = PrivacyScreenController(
+      settings: PrivacyScreenSettings(
+        sensitivity: config.value.privacySensitivity ?? 0.75,
+        detectShoulderSurfers:
+            config.value.privacyDetectShoulderSurfers ?? true,
+        startOnLaunch: config.value.privacyStartOnLaunch ?? false,
+      ),
+      hotkeyChannel: hotkeyChannel,
+      onSettingsChanged: (settings) {
+        final next = config.value.copyWith(
+          privacySensitivity: settings.sensitivity,
+          privacyDetectShoulderSurfers: settings.detectShoulderSurfers,
+          privacyStartOnLaunch: settings.startOnLaunch,
+        );
+        configRepo.save(next);
+        config.value = next;
+      },
+    );
   }
 
   final String dataDir;
@@ -130,6 +153,12 @@ class DjAppState {
   late final RoutineStore routines;
   late final IntegrationRegistry integrations;
   late final WalkthroughEngine walkthroughEngine;
+
+  /// Privacy Screen controller (Windows only). Owns the camera, the
+  /// gaze decision, the blackout window and the Ctrl+Alt+P override.
+  /// Created once here so the override hotkey works even before the
+  /// Privacy Screen page is opened; initialized in main.dart.
+  late final PrivacyScreenController privacyScreen;
 
   late final ValueNotifier<AppConfig> config;
   final ValueNotifier<DjStatus?> status = ValueNotifier<DjStatus?>(null);

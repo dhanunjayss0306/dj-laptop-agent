@@ -24,6 +24,11 @@ Future<void> main() async {
   // blocks startup.
   // ignore: unawaited_futures
   app.registerHotkeyAndFloatingButton();
+  // Privacy Screen: registers the Ctrl+Alt+P override hotkey (Windows
+  // only) and starts protection if the setting is on. Never blocks
+  // startup.
+  // ignore: unawaited_futures
+  app.privacyScreen.initialize();
   // Capability probes take up to a few seconds; refresh in the
   // background so startup is not blocked.
   // ignore: unawaited_futures

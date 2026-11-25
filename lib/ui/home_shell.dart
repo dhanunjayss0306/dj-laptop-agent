@@ -18,6 +18,7 @@ import 'files_page.dart';
 import 'folders_dialog.dart';
 import 'memory_page.dart';
 import 'organize_page.dart';
+import 'privacy_screen_page.dart';
 import 'routines_page.dart';
 import 'screen_qa_flow.dart';
 import 'settings_page.dart';
@@ -34,6 +35,7 @@ const List<(String title, IconData icon)> _pages = [
   ('Routines', Icons.list),
   ('Agent', Icons.smart_toy),
   ('Tools', Icons.build),
+  ('Privacy Screen', Icons.visibility_off),
   ('Settings', Icons.settings),
 ];
 
@@ -205,6 +207,7 @@ class _HomeShellState extends State<HomeShell> {
         RoutinesPage(app: app),
         AgentPage(app: app),
         ToolsPage(app: app),
+        PrivacyScreenPage(app: app),
         SettingsPage(app: app),
       ],
     );
@@ -290,6 +293,42 @@ class _Banners extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Privacy Screen override: always visible while protection is
+        // paused, on every page, so he always knows protection is off.
+        // The tray tooltip cannot change from Dart, so this banner is
+        // the app-wide status for the override.
+        AnimatedBuilder(
+          animation: app.privacyScreen,
+          builder: (context, _) {
+            if (!app.privacyScreen.isOverrideOn) {
+              return const SizedBox.shrink();
+            }
+            return Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF8E1),
+                border:
+                    Border(bottom: BorderSide(color: Color(0xFF9A6A00))),
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Privacy paused — press Ctrl+Alt+P to resume',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => app.privacyScreen.setOverride(false),
+                    child: const Text('Resume protection'),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
         ValueListenableBuilder(
           valueListenable: app.status,
           builder: (context, status, _) {

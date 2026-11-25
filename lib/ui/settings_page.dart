@@ -231,6 +231,53 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: 12),
                   _card(
+                    title: 'Privacy Screen',
+                    child: AnimatedBuilder(
+                      animation: widget.app.privacyScreen,
+                      builder: (context, _) {
+                        final privacy = widget.app.privacyScreen;
+                        if (!Platform.isWindows) {
+                          return const Text(
+                            'Privacy Screen is laptop-only. It needs a '
+                            'Windows laptop with a webcam, so it does not '
+                            'run on this phone.',
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              privacy.statusMessage,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                      'Start protection when DJ starts'),
+                                ),
+                                Switch(
+                                  value: privacy.settings.startOnLaunch,
+                                  onChanged: (value) => privacy
+                                      .setStartOnLaunch(value),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Full controls — start/stop, sensitivity, '
+                              'second-face warning and the Ctrl+Alt+P '
+                              'override — are on the Privacy Screen page.',
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _card(
                     title: 'About DJ',
                     child: const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

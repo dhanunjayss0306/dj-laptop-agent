@@ -40,6 +40,15 @@ dependencies:
   firebase_core: ^4.2.0
   firebase_auth: ^6.1.0
   cloud_firestore: ^6.1.0
+  # Privacy Screen (Windows, webcam): on-device face detection
+  # (BlazeFace via LiteRT, bundled model, no network, no keys) and
+  # the fullscreen blackout window. Design ported from SafeScreen
+  # by kv4u (MIT) — see THIRD_PARTY_NOTICES.md. The model file
+  # (face_detection_front.tflite, Google MediaPipe BlazeFace,
+  # Apache 2.0) ships inside the face_detection_tflite package.
+  face_detection_tflite: ^4.0.0
+  window_manager: ^0.4.3
+  screen_retriever: ^0.2.0
 
 dev_dependencies:
   flutter_test:

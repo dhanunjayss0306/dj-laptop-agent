@@ -52,23 +52,36 @@ DjHotkeyChannel::~DjHotkeyChannel() {
   // would keep firing WM_HOTKEY at a dead window. Then unregister the
   // MethodChannel handler so a late Dart call cannot reach a dead object.
   Unregister();
+  UnregisterPrivacy();
   channel_.SetMethodCallHandler(nullptr);
 }
 
 bool DjHotkeyChannel::HandleMessage(HWND hwnd, UINT message, WPARAM wparam,
                                     LPARAM lparam) {
-  if (message != WM_HOTKEY || hwnd != hwnd_ ||
-      static_cast<int>(wparam) != kHotkeyId || !registered_) {
+  if (message != WM_HOTKEY || hwnd != hwnd_) {
     return false;
   }
-  // Fire-and-forget, mirroring DjSystemChannel::NotifyTrayHidden: Dart
-  // owns the Stream (HotkeyChannel.onHotkeyPressed) and decides what the
-  // press does (default: show/focus the DJ window).
-  channel_.InvokeMethod(
-      "onHotkeyPressed",
-      std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(
-          flutter::EncodableMap{})));
-  return true;
+  const int id = static_cast<int>(wparam);
+  if (id == kHotkeyId && registered_) {
+    // Fire-and-forget, mirroring DjSystemChannel::NotifyTrayHidden: Dart
+    // owns the Stream (HotkeyChannel.onHotkeyPressed) and decides what the
+    // press does (default: show/focus the DJ window).
+    channel_.InvokeMethod(
+        "onHotkeyPressed",
+        std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(
+            flutter::EncodableMap{})));
+    return true;
+  }
+  if (id == kPrivacyHotkeyId && privacy_registered_) {
+    // Privacy Screen override (Ctrl+Alt+P): Dart owns the Stream
+    // (HotkeyChannel.onPrivacyHotkeyPressed) and toggles the override.
+    channel_.InvokeMethod(
+        "onPrivacyHotkeyPressed",
+        std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(
+            flutter::EncodableMap{})));
+    return true;
+  }
+  return false;
 }
 
 void DjHotkeyChannel::Unregister() {
@@ -78,23 +91,29 @@ void DjHotkeyChannel::Unregister() {
   registered_ = false;
 }
 
+void DjHotkeyChannel::UnregisterPrivacy() {
+  if (privacy_registered_ && hwnd_ != nullptr) {
+    ::UnregisterHotKey(hwnd_, kPrivacyHotkeyId);
+  }
+  privacy_registered_ = false;
+}
+
 void DjHotkeyChannel::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const std::string& method = call.method_name();
 
-  if (method == "registerHotkey") {
+  // Registers one hotkey id with the given modifiers/vk. On failure the
+  // reply is {"ok": false, "message": ...} and nothing is left
+  // registered under that id. Shared by registerHotkey (id 1) and
+  // registerPrivacyHotkey (id 2).
+  auto register_one = [this](int id, bool* registered_flag,
+                             const std::vector<std::string>& modifiers,
+                             int64_t vk,
+                             std::unique_ptr<flutter::MethodResult<
+                                 flutter::EncodableValue>> result) {
     if (hwnd_ == nullptr) {
       result->Success(Err("registerHotkey needs a window to attach to."));
-      return;
-    }
-    std::vector<std::string> modifiers;
-    int64_t vk = 0;
-    if (!GetStringListArg(call, "modifiers", &modifiers) ||
-        !GetIntArg(call, "vk", &vk)) {
-      result->Success(
-          Err("registerHotkey needs a 'modifiers' list of strings and "
-              "an integer 'vk' virtual-key code."));
       return;
     }
     if (vk <= 0 || vk > 255) {
@@ -102,13 +121,14 @@ void DjHotkeyChannel::HandleMethodCall(
           Err("registerHotkey needs a 'vk' virtual-key code (1-255)."));
       return;
     }
-    // One hotkey at a time: a new registration replaces the old one.
-    Unregister();
+    if (*registered_flag) {
+      ::UnregisterHotKey(hwnd_, id);
+      *registered_flag = false;
+    }
     const UINT flags = ModifiersFromNames(modifiers) | MOD_NOREPEAT;
     // MOD_NOREPEAT: no repeat WM_HOTKEY while the keys are held down;
     // one press is one Dart event.
-    if (::RegisterHotKey(hwnd_, kHotkeyId, flags, static_cast<UINT>(vk)) ==
-        FALSE) {
+    if (::RegisterHotKey(hwnd_, id, flags, static_cast<UINT>(vk)) == FALSE) {
       const DWORD error = ::GetLastError();
       if (error == ERROR_HOTKEY_ALREADY_REGISTERED) {
         result->Success(Err("hotkey already in use — pick another"));
@@ -118,14 +138,51 @@ void DjHotkeyChannel::HandleMethodCall(
       }
       return;
     }
-    registered_ = true;
+    *registered_flag = true;
     result->Success(Ok());
+  };
+
+  if (method == "registerHotkey") {
+    std::vector<std::string> modifiers;
+    int64_t vk = 0;
+    if (!GetStringListArg(call, "modifiers", &modifiers) ||
+        !GetIntArg(call, "vk", &vk)) {
+      result->Success(
+          Err("registerHotkey needs a 'modifiers' list of strings and "
+              "an integer 'vk' virtual-key code."));
+      return;
+    }
+    // One main hotkey at a time: a new registration replaces the old one.
+    register_one(kHotkeyId, &registered_, modifiers, vk, std::move(result));
     return;
   }
 
   if (method == "unregisterHotkey") {
     // Unregistering when nothing is registered is fine, not an error.
     Unregister();
+    result->Success(Ok());
+    return;
+  }
+
+  if (method == "registerPrivacyHotkey") {
+    std::vector<std::string> modifiers;
+    int64_t vk = 0;
+    if (!GetStringListArg(call, "modifiers", &modifiers) ||
+        !GetIntArg(call, "vk", &vk)) {
+      result->Success(
+          Err("registerPrivacyHotkey needs a 'modifiers' list of strings "
+              "and an integer 'vk' virtual-key code."));
+      return;
+    }
+    // Independent id: registering the override never replaces Ctrl+Alt+D.
+    register_one(kPrivacyHotkeyId, &privacy_registered_, modifiers, vk,
+                 std::move(result));
+    return;
+  }
+
+  if (method == "unregisterPrivacyHotkey") {
+    // Unregistering when nothing is registered is fine, not an error.
+    UnregisterPrivacy();
     result->Success(Ok());
     return;
   }

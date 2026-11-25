@@ -14,6 +14,7 @@ This is the Flutter version of DJ. There is no Electron here. The old Electron v
 - **Find duplicate files** — extra copies of the same file. Delete the copies you pick (they go to the Recycle Bin, only after you confirm), or merge a group.
 - **Open apps by name** — notepad, chrome, calculator, clock, and more.
 - **See your screen** — press the hotkey and DJ sees what you see. It only looks when you press the hotkey. Screenshots are never stored.
+- **Privacy Screen (laptop only)** — the webcam watches whether you are looking at the screen. Look away, walk off, or someone looks over your shoulder, and the whole screen goes black until only you are looking again. Press Ctrl+Alt+P anywhere to pause it and reveal the screen; press again to resume. Fully local — on-device face detection, no network, no keys, frames never saved. Based on SafeScreen by kv4u (MIT), see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **Point and draw on your screen** — DJ points at exactly where to click, and draws circles and arrows to show the way.
 - **Talk to you** — ask out loud, DJ answers out loud. On Windows it uses a local speech model (whisper.cpp, offline, no key). On the phone it uses Android's built-in speech.
 - **Walk you through tasks** — step-by-step walkthroughs, all the way to done. DJ can also teach you any tool on screen.
@@ -56,6 +57,7 @@ If you want to build from source, see [WINDOWS-BUILD.md](WINDOWS-BUILD.md). It c
 
 - Nothing leaves your laptop or phone unless you use a cloud feature.
 - Screenshots are memory-only and never stored.
+- Privacy Screen camera frames are memory-only and never saved to disk. Face detection runs on the laptop; nothing is sent anywhere.
 - DJ keeps only short text summaries for context. You can delete all DJ data in Settings.
 - No account is needed. No API key is needed for Core.
 
@@ -63,9 +65,9 @@ If you want to build from source, see [WINDOWS-BUILD.md](WINDOWS-BUILD.md). It c
 
 - `lib/` — the Dart app (core brain, services, platform channels, UI, features).
 - `android/` — Android runner + Kotlin native code (screen capture, overlay, AccessibilityService, speech).
-- `windows/` — Windows runner + C++ native code (screen capture, overlay, SendInput, hotkey, tray).
+- `windows/` — Windows runner + C++ native code (screen capture, overlay, SendInput, hotkey, tray, Privacy Screen webcam capture).
 - `worker/` — Cloudflare Worker proxy for the cloud AI keys.
-- `test/` — 208 tests.
+- `test/` — 311 tests.
 - `PORTING-SPEC.md` — how the Electron DJ was ported to Flutter, and what was found.
 
 ## History

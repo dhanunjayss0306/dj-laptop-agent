@@ -1,7 +1,8 @@
 // DJ global hotkey (Windows).
 //
 // MethodChannel "com.dhanunjay.dj/hotkey": registerHotkey(modifiers, vk),
-// unregisterHotkey().
+// unregisterHotkey(), registerPrivacyHotkey(modifiers, vk),
+// unregisterPrivacyHotkey().
 //
 // A system-wide hotkey via Win32 RegisterHotKey on the runner window.
 // WM_HOTKEY arrives on that window even when DJ is not the focused window
@@ -14,11 +15,19 @@
 // what Dart asks for and keeps no default of its own. Only one hotkey is
 // held at a time: registering a new one replaces the old one.
 //
-// If the hotkey is already taken by another app, registration fails with
+// A second, independent hotkey lives alongside it for the Privacy Screen
+// override: Ctrl+Alt+P (vk 0x50 'P'), registered with
+// registerPrivacyHotkey and reported as "onPrivacyHotkeyPressed". The two
+// hotkeys use different RegisterHotKey ids (1 and 2), so registering one
+// never replaces the other. Ctrl+Alt+P was chosen because it does not
+// clash with Ctrl+Alt+D or anything else in DJ.
+//
+// If a hotkey is already taken by another app, registration fails with
 // {"ok": false, "message": "hotkey already in use — pick another"}.
 // DJ never steals another app's hotkey and never crashes on failure.
-// The hotkey is unregistered when this channel is destroyed (window
-// destroy) and when unregisterHotkey() is called.
+// Hotkeys are unregistered when this channel is destroyed (window
+// destroy) and when unregisterHotkey()/unregisterPrivacyHotkey() is
+// called.
 
 #ifndef RUNNER_DJ_HOTKEY_CHANNEL_H_
 #define RUNNER_DJ_HOTKEY_CHANNEL_H_
@@ -54,11 +63,18 @@ class DjHotkeyChannel {
   // Unregisters the hotkey if one is registered. No reply, no failure.
   void Unregister();
 
+  // Unregisters the Privacy Screen override hotkey, if registered.
+  void UnregisterPrivacy();
+
   flutter::MethodChannel<flutter::EncodableValue> channel_;
   HWND hwnd_ = nullptr;
   bool registered_ = false;
-  // Single hotkey id: only one hotkey is held at a time.
+  bool privacy_registered_ = false;
+  // Main hotkey id (Ctrl+Alt+D). Only one main hotkey is held at a time.
   static constexpr int kHotkeyId = 1;
+  // Privacy Screen override hotkey id (Ctrl+Alt+P). A separate id so the
+  // two hotkeys coexist; registering one never replaces the other.
+  static constexpr int kPrivacyHotkeyId = 2;
 };
 
 }  // namespace dj
