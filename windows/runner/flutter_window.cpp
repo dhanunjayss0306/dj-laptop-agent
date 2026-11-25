@@ -66,6 +66,14 @@ bool FlutterWindow::OnCreate() {
       });
   tray_->Create();
 
+  // Show the window immediately on launch. The first-frame callback
+  // above also calls Show(), but if the first Flutter frame is
+  // delayed (slow plugin init, slow first build) the window would
+  // otherwise stay hidden with no way to open it. Showing here
+  // guarantees the window appears; the first frame paints into it
+  // when ready. This is the v1.2.5 fix for "app runs, no window".
+  this->Show();
+
   return true;
 }
 
