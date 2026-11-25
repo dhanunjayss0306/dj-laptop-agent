@@ -1,0 +1,95 @@
+# DJ — build the Android APK and the Windows exe on every push to main
+# and on every version tag (v*). On a tag, attach both to a GitHub Release,
+# so DJ can be installed on any phone or laptop by downloading from
+# Releases — no Flutter, Android Studio, or Visual Studio needed.
+#
+# The Windows build needs the tray icon: the workflow copies
+# windows/runner/resources/app_icon.ico into the Release folder as
+# tray-icon.ico before zipping (the app only shows a tray icon if that
+# file sits next to dj.exe).
+
+name: Build DJ
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  build-android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dj-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Add tray icon next to dj.exe
+        shell: pwsh
+        run: Copy-Item windows/runner/resources/app_icon.ico build/windows/x64/runner/Release/tray-icon.ico
+      - name: Zip the Windows build
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dj-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dj-windows-zip
+          path: dj-windows.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dj-android-apk
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: dj-windows-zip
+          path: dist
+      - name: Friendly file names for the release
+        run: mv dist/app-release.apk dist/dj-android.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dj-android.apk
+            dist/dj-windows.zip
+          generate_release_notes: true

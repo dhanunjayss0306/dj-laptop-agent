@@ -1,0 +1,29 @@
+# dj-proxy — Cloudflare Worker for DJ
+#
+# The app NEVER holds a provider API key. The keys live only as Worker
+# secrets (set with `npx wrangler secret put <NAME>`, see below) and the
+# Worker forwards requests to the providers.
+#
+# Secrets to set (one command per secret; wrangler prompts for the value,
+# the value is never written to a file):
+#   npx wrangler secret put OPENAI_API_KEY
+#   npx wrangler secret put OPENROUTER_API_KEY
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put ASSEMBLYAI_API_KEY
+#   npx wrangler secret put ELEVENLABS_API_KEY
+#
+# Non-secret vars (safe to keep here):
+#   ELEVENLABS_VOICE_ID — default ElevenLabs voice id (not a secret).
+#     Replace the placeholder with your voice id, or leave it and pass
+#     voiceId per request from the app.
+#   ALLOWED_ORIGINS — optional, comma-separated browser origins allowed
+#     through CORS. The Flutter app sends no Origin header and is never
+#     blocked by this. Leave unset unless a web build of DJ needs it.
+
+name = "dj-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-11-25"
+
+[vars]
+ELEVENLABS_VOICE_ID = "YOUR_ELEVENLABS_VOICE_ID"
+# ALLOWED_ORIGINS = ""

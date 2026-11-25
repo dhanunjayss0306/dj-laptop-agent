@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths for openFile(): DJ hands an external app a content:// URI
+     for a user file instead of a file:// URI (blocked since Android 7). -->
+<paths>
+    <!-- DJ's own external files dir (also where the .trash folder lives). -->
+    <external-files-path name="dj_files" path="." />
+    <!-- User files anywhere on shared storage (Downloads, Documents, ...). -->
+    <external-path name="external_storage" path="." />
+    <!-- App cache (screen-capture temp files, if any). -->
+    <cache-path name="cache" path="." />
+    <!-- Internal app files. -->
+    <files-path name="internal_files" path="." />
+</paths>

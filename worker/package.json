@@ -1,0 +1,1 @@
+{"description":"Cloudflare Worker proxy for DJ — holds the AI provider keys so the app never does.","devDependencies":{"@cloudflare/workers-types":"^5.0.0","typescript":"^5.9.0","wrangler":"^4.0.0"},"name":"dj-proxy","private":true,"scripts":{"deploy":"wrangler deploy","dev":"wrangler dev","typecheck":"tsc --noEmit"},"version":"1.0.0"}

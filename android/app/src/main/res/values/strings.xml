@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">DJ uses this service only when you ask it to, to tap, swipe, type and press Back, Home or Recents on your behalf. DJ never types into password fields and never acts without a task in progress.</string>
+</resources>
