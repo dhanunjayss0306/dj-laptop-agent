@@ -198,13 +198,29 @@ class _SettingsPageState extends State<SettingsPage> {
                               Switch(
                                 value: config.startAtLogin ?? false,
                                 onChanged: (value) async {
-                                  final effective = await widget
-                                      .app.systemOps
-                                      .setStartAtLogin(value);
-                                  await widget.app.saveConfig(
-                                    config.copyWith(
-                                        startAtLogin: effective),
-                                  );
+                                  // setStartAtLogin throws when the native
+                                  // side cannot change the registry key;
+                                  // without this the switch silently stays
+                                  // put and the error goes unhandled.
+                                  try {
+                                    final effective = await widget
+                                        .app.systemOps
+                                        .setStartAtLogin(value);
+                                    await widget.app.saveConfig(
+                                      config.copyWith(
+                                          startAtLogin: effective),
+                                    );
+                                  } catch (_) {
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Could not change start-at-login.',
+                                        ),
+                                      ),
+                                    );
+                                  }
                                 },
                               ),
                             ],

@@ -122,4 +122,118 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Folders DJ searches'), findsOneWidget);
   });
+
+  testWidgets('badge chip names the cloud provider at phone width',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final tmp = Directory.systemTemp.createTempSync('dj-badge-test-');
+    final home = Directory('${tmp.path}/home')..createSync(recursive: true);
+    Directory('${home.path}/Downloads').createSync();
+    final dataDir = '${tmp.path}/data';
+    Directory(dataDir).createSync(recursive: true);
+    File('$dataDir/keyword_index.json').writeAsStringSync(
+      '{"files":[{"path":"${home.path}/x.txt","name":"x.txt","folder":"${home.path}","text":"hello"}],"folders":[]}',
+    );
+    final app = DjAppState(
+      dataDir: dataDir,
+      systemOps: FakeSystemOps(home.path),
+    );
+    app.config.value = app.config.value.copyWith(
+      folders: [FolderEntry(path: home.path, enabled: true)],
+    );
+    // A configured Worker (dj_cloud.json) resolves to Cloud (gemini).
+    app.status.value = DjStatus(
+      filesIndexed: 1,
+      foldersIndexed: 1,
+      vectorOk: false,
+      embedderState: 'not started',
+      embedderSource: 'none',
+      hasIndex: true,
+      indexStale: false,
+      config: app.config.value,
+      capability: const CapabilityStatus(
+        layer: 'cloud',
+        local: LocalModelHealth(available: false),
+        cloud: CloudHealth(configured: true, valid: true, reason: 'gemini'),
+        message: 'Cloud (gemini) (local model also available)',
+        checkedAt: '',
+      ),
+      startAtLogin: false,
+      hasTray: false,
+    );
+    await tester.pumpWidget(DjApp(app: app));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    // The AppBar chip names the provider; the footer and the Command
+    // Center status card both show the full message, so it appears
+    // twice. A 390px AppBar with the longer chip must not overflow.
+    expect(find.text('Cloud (gemini)'), findsOneWidget);
+    expect(find.text('Cloud (gemini) (local model also available)'),
+        findsNWidgets(2));
+
+    // Longest provider name: the AppBar must still fit at 390px.
+    app.status.value = DjStatus(
+      filesIndexed: 1,
+      foldersIndexed: 1,
+      vectorOk: false,
+      embedderState: 'not started',
+      embedderSource: 'none',
+      hasIndex: true,
+      indexStale: false,
+      config: app.config.value,
+      capability: const CapabilityStatus(
+        layer: 'cloud',
+        local: LocalModelHealth(available: false),
+        cloud: CloudHealth(
+            configured: true, valid: true, reason: 'openrouter'),
+        message: 'Cloud (openrouter)',
+        checkedAt: '',
+      ),
+      startAtLogin: false,
+      hasTray: false,
+    );
+    await tester.pump();
+    // Chip + footer + status card all show it.
+    expect(find.text('Cloud (openrouter)'), findsNWidgets(3));
+  });
+
+  testWidgets('first run shows the folders dialog at phone width',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final tmp = Directory.systemTemp.createTempSync('dj-first-run-test-');
+    final home = Directory('${tmp.path}/home')..createSync(recursive: true);
+    Directory('${home.path}/Downloads').createSync();
+    final dataDir = '${tmp.path}/data';
+    Directory(dataDir).createSync(recursive: true);
+    // No keyword_index.json: first run, so the setup dialog must appear.
+    final app = DjAppState(
+      dataDir: dataDir,
+      systemOps: FakeSystemOps(home.path),
+    );
+    app.config.value = app.config.value.copyWith(
+      folders: [FolderEntry(path: home.path, enabled: true)],
+    );
+    await tester.pumpWidget(DjApp(app: app));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Set up DJ'), findsOneWidget);
+    expect(find.text('Save and build index'), findsOneWidget);
+
+    await tester.tap(find.text('Save and build index'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Set up DJ'), findsNothing);
+    expect(find.text('Command Center'), findsWidgets);
+  });
 }

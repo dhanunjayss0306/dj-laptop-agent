@@ -71,8 +71,7 @@ Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
 
   final client = app.buildWorkerClient();
   final qa = app.buildScreenQAForClient(client);
-  final answer = await qa.ask(question);
-  client?.close();
+  final answer = await qa.ask(question).whenComplete(() => client?.close());
 
   if (!context.mounted) return;
   Navigator.of(context, rootNavigator: true).pop();

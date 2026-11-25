@@ -50,19 +50,35 @@ class _ToolsPageState extends State<ToolsPage> {
       _tutorBusy = true;
       _tutorText = null;
     });
+    // One WorkerClient for this one ask: buildScreenQA() would create
+    // one that nobody closes, leaking its HttpClient on every tap.
+    // The client is closed in the finally below, whatever happens.
+    final client = widget.app.buildWorkerClient();
     final tutor = Tutor(
-      screenQA: widget.app.buildScreenQA(),
+      screenQA: widget.app.buildScreenQAForClient(client),
       walkthrough: widget.app.walkthroughEngine,
       enabled: _tutorEnabled,
     );
-    final explanation = await tutor.explainFromScreen(appName, question);
-    if (!mounted) return;
-    setState(() {
-      _tutorBusy = false;
-      _tutorText = explanation.text;
-    });
-    if (explanation.lesson != null) {
-      await tutor.startLesson(explanation.lesson!);
+    try {
+      final explanation = await tutor.explainFromScreen(appName, question);
+      if (!mounted) return;
+      setState(() {
+        _tutorBusy = false;
+        _tutorText = explanation.text;
+      });
+      if (explanation.lesson != null) {
+        await tutor.startLesson(explanation.lesson!);
+      }
+    } catch (e) {
+      // A failure must not leave the Explain button stuck on
+      // "Please wait..." — report it plainly instead.
+      if (!mounted) return;
+      setState(() {
+        _tutorBusy = false;
+        _tutorText = 'Something went wrong: $e';
+      });
+    } finally {
+      client?.close();
     }
   }
 

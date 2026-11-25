@@ -4,7 +4,10 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 
 #include "dj_camera_channel.h"
 #include "dj_cursor_channel.h"
@@ -61,6 +64,26 @@ class FlutterWindow : public Win32Window {
   // Set only by the tray "Quit DJ" menu item. While false, closing the
   // window hides it into the tray instead of quitting.
   bool is_quitting_ = false;
+
+  // First-frame fallback + watchdog (see flutter_window.cpp).
+  //
+  // The Flutter child window is blank white until the engine paints
+  // its first frame. While no frame has arrived, a plain native
+  // "DJ is starting..." label covers the client area so the window
+  // never sits blank, and a watchdog thread logs whether the frame is
+  // late and whether the platform thread is still pumping messages.
+  // The label is hidden the moment the first frame callback fires, so
+  // the normal fast path is untouched.
+  HWND starting_label_ = nullptr;
+  std::atomic<bool> first_frame_seen_{false};
+  std::atomic<bool> stop_watchdog_{false};
+  std::thread watchdog_thread_;
+
+  // Watchdog body: runs on its own thread, never on the UI thread.
+  void WatchdogLoop(HWND window, DWORD started_tick);
+
+  // (Re)positions the starting label over the client area.
+  void LayoutStartingLabel();
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -12,6 +12,7 @@ add_executable(${BINARY_NAME} WIN32
   "dj_hotkey.cpp"
   "dj_input_channel.cpp"
   "dj_screen_channel.cpp"
+  "dj_startup_log.cpp"
   "dj_system_channel.cpp"
   "dj_tray.cpp"
   "dj_voice_channel.cpp"

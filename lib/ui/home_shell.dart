@@ -63,9 +63,23 @@ class _HomeShellState extends State<HomeShell> {
   int _lastPrimary = 0;
   StreamSubscription<void>? _hotkeySub;
   bool _screenQaRunning = false;
+  // Pages are built lazily: only the Command Center (index 0) exists
+  // at startup. Every other page is built the first time it is opened
+  // and then kept alive by the IndexedStack.
+  //
+  // This matters because IndexedStack builds ALL of its children on
+  // the first frame, and several pages start heavy work in initState:
+  // DuplicatesPage walks the whole home folder hashing files
+  // (synchronous listSync/statSync + pure-Dart SHA-256, with no yield
+  // to the event loop), SystemPage awaits a platform-channel call, and
+  // MemoryPage reads files synchronously. Building all 11 pages before
+  // the first frame meant the first frame could not be scheduled until
+  // that work finished — a blank white window.
+  final Set<int> _builtPages = {0};
 
   void _selectPage(int page) {
     setState(() {
+      _builtPages.add(page);
       _current = page;
       final primary = _primaryIndices.indexOf(page);
       if (primary != -1) _lastPrimary = primary;
@@ -153,7 +167,7 @@ class _HomeShellState extends State<HomeShell> {
                               shape: BoxShape.circle,
                             ),
                           ),
-                          label: Text(capabilityBadgeLabel(cap)),
+                          label: Text(capabilityBadgeChipLabel(cap)),
                           backgroundColor: const Color(0xFFFFFFFF),
                           side: const BorderSide(
                               color: Color(0xFFE5E5E5)),
@@ -164,14 +178,24 @@ class _HomeShellState extends State<HomeShell> {
                       );
                     },
                   ),
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: OutlinedButton.icon(
-                      onPressed: _openPalette,
-                      icon: const Icon(Icons.search, size: 18),
-                      label: const Text('Search'),
-                    ),
-                  ),
+                  // Narrow screens: the provider chip ('Cloud (gemini)')
+                  // plus the hamburger plus a labelled Search button
+                  // overflow a 390px AppBar by ~23px, so the Search
+                  // button is icon-only there; wide keeps the label.
+                  wide
+                      ? Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: OutlinedButton.icon(
+                            onPressed: _openPalette,
+                            icon: const Icon(Icons.search, size: 18),
+                            label: const Text('Search'),
+                          ),
+                        )
+                      : IconButton(
+                          tooltip: 'Search',
+                          onPressed: _openPalette,
+                          icon: const Icon(Icons.search),
+                        ),
                 ],
               ),
               body: Column(
@@ -235,21 +259,28 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _body() {
     final app = widget.app;
+    // Unvisited pages are placeholders until first opened (see
+    // _builtPages): their initState work must not run at startup.
+    Widget page(int i) {
+      if (!_builtPages.contains(i)) return const SizedBox.shrink();
+      return switch (i) {
+        0 => CommandPage(app: app),
+        1 => FilesPage(app: app),
+        2 => DuplicatesPage(app: app),
+        3 => OrganizePage(app: app),
+        4 => SystemPage(app: app),
+        5 => MemoryPage(app: app),
+        6 => RoutinesPage(app: app),
+        7 => AgentPage(app: app),
+        8 => ToolsPage(app: app),
+        9 => PrivacyScreenPage(app: app),
+        _ => SettingsPage(app: app),
+      };
+    }
+
     return IndexedStack(
       index: _current,
-      children: [
-        CommandPage(app: app),
-        FilesPage(app: app),
-        DuplicatesPage(app: app),
-        OrganizePage(app: app),
-        SystemPage(app: app),
-        MemoryPage(app: app),
-        RoutinesPage(app: app),
-        AgentPage(app: app),
-        ToolsPage(app: app),
-        PrivacyScreenPage(app: app),
-        SettingsPage(app: app),
-      ],
+      children: [for (var i = 0; i < _pages.length; i++) page(i)],
     );
   }
 }

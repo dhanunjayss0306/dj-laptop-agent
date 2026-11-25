@@ -7,10 +7,12 @@
 #include <vector>
 
 #include "flutter_window.h"
+#include "dj_startup_log.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  dj::DjLogStartup("wWinMain entered");
   // Single instance: if DJ is already running, bring its window to
   // the front instead of starting a second copy (second copies create
   // extra tray icons and fight over the hotkey). The mutex is released
@@ -18,6 +20,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   HANDLE single_instance = ::CreateMutexW(nullptr, FALSE, L"DJAppSingleInstance");
   if (single_instance != nullptr &&
       ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    dj::DjLogStartup("single-instance: another DJ is running, exiting");
     ::CloseHandle(single_instance);
     HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW",
                                   L"DJ \u2014 your files, found");
@@ -51,16 +54,21 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   // DJ window size from PORTING-SPEC.md §0: 880 x 720, no application menu.
   Win32Window::Size size(880, 720);
+  dj::DjLogStartup("window.Create started");
   if (!window.Create(L"DJ \u2014 your files, found", origin, size)) {
+    dj::DjLogStartup("window.Create FAILED");
     return EXIT_FAILURE;
   }
+  dj::DjLogStartup("window.Create returned");
   window.SetQuitOnClose(true);
 
+  dj::DjLogStartup("message loop entered");
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
     ::TranslateMessage(&msg);
     ::DispatchMessage(&msg);
   }
+  dj::DjLogStartup("message loop exited");
 
   ::CoUninitialize();
   return EXIT_SUCCESS;

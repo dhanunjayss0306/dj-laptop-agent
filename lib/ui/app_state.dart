@@ -70,6 +70,11 @@ class DjAppState {
     required this.dataDir,
     required this.systemOps,
     Embedder? embedder,
+    // True by default so tests and other direct constructions keep the
+    // old behaviour (index available immediately). main() passes false
+    // and calls loadIndexFromDisk() after the first frame, so a large
+    // saved index cannot delay the first paint.
+    bool loadIndex = true,
   }) {
     configRepo = cfg.ConfigRepository(dataDir: dataDir);
     config = ValueNotifier<AppConfig>(configRepo.load());
@@ -78,7 +83,7 @@ class DjAppState {
       embedder: embedder ?? NotStartedEmbedder(),
       onProgress: (p) => indexProgress.value = p,
     );
-    indexer.loadFromDisk();
+    if (loadIndex) indexer.loadFromDisk();
     duplicates = DuplicateService(systemOps: systemOps);
     chat = ChatService(
       indexer: indexer,
@@ -139,6 +144,11 @@ class DjAppState {
       },
     );
   }
+
+  /// Loads the saved search index from disk. Called once at startup
+  /// after the first frame (see main.dart), or synchronously by the
+  /// constructor when [loadIndex] is true.
+  void loadIndexFromDisk() => indexer.loadFromDisk();
 
   final String dataDir;
   final SystemOps systemOps;
@@ -303,6 +313,12 @@ class DjAppState {
       encoding: utf8,
     );
     _refreshChatCloud();
+    // The capability probe caches for 30 s, so without a forced
+    // refresh the badge would keep saying "Core only" after the user
+    // just saved a Worker URL. Refresh in the background; the badge
+    // and footer update when it lands.
+    // ignore: unawaited_futures
+    refreshStatus(force: true);
   }
 
   /// True when [provider] is one of the six providers DJ knows.
@@ -531,6 +547,23 @@ String capabilityBadgeLabel(CapabilityStatus? cap) {
     'local' => 'Local model',
     _ => 'Core only',
   };
+}
+
+/// AppBar chip label: like [capabilityBadgeLabel], but a configured
+/// Worker names its provider — 'Cloud (gemini)' — so the badge says
+/// which cloud is in use. The provider rides in [CloudHealth.reason]
+/// (see checkCloudKey); a legacy key has no reason, so it stays
+/// 'Cloud'. Core-only is unchanged.
+String capabilityBadgeChipLabel(CapabilityStatus? cap) {
+  if (cap == null) return 'Checking';
+  if (cap.layer == 'cloud') {
+    final provider = cap.cloud.reason;
+    if (provider != null && provider.isNotEmpty) {
+      return 'Cloud ($provider)';
+    }
+    return 'Cloud';
+  }
+  return capabilityBadgeLabel(cap);
 }
 
 /// Badge dot colour: green when a model/cloud layer is up, amber when

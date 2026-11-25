@@ -28,8 +28,24 @@ class DuplicateService {
   final SystemOps? systemOps;
   DuplicateService({this.systemOps});
 
+  // Files processed since the last yield to the event loop. The scan
+  // below is synchronous filesystem work (listSync/statSync) plus
+  // pure-Dart SHA-256; without a periodic yield the UI isolate cannot
+  // schedule a frame for the whole scan, so the window sits blank
+  // white until it finishes. Yielding every few hundred files (and
+  // after each hashed file, the expensive step) keeps the UI alive.
+  int _sinceYield = 0;
+
+  Future<void> _yieldToEventLoop() async {
+    _sinceYield = 0;
+    // Duration.zero yields to the event loop (not just the microtask
+    // queue), so a pending frame gets its turn.
+    await Future<void>.delayed(Duration.zero);
+  }
+
   /// Find extra copies in the given folders. Biggest waste first.
   Future<List<DuplicateGroup>> find(List<String> folders) async {
+    _sinceYield = 0;
     final bySize = <int, List<String>>{};
     for (final folder in folders) {
       if (!_isDirectory(folder)) continue;
@@ -54,6 +70,9 @@ class DuplicateService {
         final digest = sha256File(p);
         if (digest == null) continue;
         (byHash[digest] ??= []).add(p);
+        // Hashing is the expensive step (pure-Dart SHA-256 over the
+        // whole file): yield after each file so frames keep running.
+        await _yieldToEventLoop();
       }
       for (final dupPaths in byHash.values) {
         if (dupPaths.length < 2) continue;
@@ -103,6 +122,7 @@ class DuplicateService {
         if (name.startsWith('.')) continue;
         if (organizerSkip.contains(name.toLowerCase())) continue;
         onFile(entry.path);
+        if (++_sinceYield >= 256) await _yieldToEventLoop();
       }
     }
   }
