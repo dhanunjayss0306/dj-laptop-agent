@@ -14,7 +14,8 @@
 // - A 401/403 from a provider means the key is expired/invalid: return the
 //   provider's status with the plain message "cloud key expired" and NEVER
 //   retry — DJ falls back to Local/Core on that signal.
-// - Every provider call has a 10 s timeout (AbortSignal.timeout).
+// - Every provider call has a timeout (AbortSignal.timeout): 120 s for
+//   streaming chat responses, 10 s for non-streaming calls.
 // - Failures are always { ok: false, message: "<plain message>" }.
 //
 // Plain TypeScript, no framework. Requires only `wrangler` to deploy.
@@ -36,6 +37,13 @@ export interface Env {
   /** Non-secret. Default ElevenLabs voice used when the app sends no voiceId. */
   ELEVENLABS_VOICE_ID: string;
   /**
+   * Optional shared key for authenticating DJ clients. When set (non-empty),
+   * /chat, /tts and /transcribe-token require the request to carry an
+   * `X-DJ-Key` header matching it (or `Authorization: Bearer <key>`).
+   * When unset, those routes are open, as before.
+   */
+  DJ_SHARED_KEY?: string;
+  /**
    * Non-secret, optional. Comma-separated browser origins allowed through
    * CORS, e.g. "https://dj.example.com". The Flutter app (dart:io) sends no
    * Origin header, so it is never blocked by this. A browser request whose
@@ -46,6 +54,9 @@ export interface Env {
 }
 
 const PROVIDER_TIMEOUT_MS = 10_000;
+// Streaming chat responses can take much longer than a single request:
+// 10 s was aborting slower LLM responses mid-stream.
+const STREAM_TIMEOUT_MS = 120_000;
 const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_MAX_TOKENS = 4096;
 // AssemblyAI realtime tokens are short-lived on purpose: 5 minutes.
@@ -140,6 +151,22 @@ function withCors(response: Response, cors: Record<string, string>): Response {
 
 function isAuthError(status: number): boolean {
   return status === 401 || status === 403;
+}
+
+/**
+ * Shared-key auth for /chat, /tts and /transcribe-token. When no
+ * DJ_SHARED_KEY secret is set the proxy stays open, as before. When it
+ * is set, the request must carry `X-DJ-Key: <key>` or
+ * `Authorization: Bearer <key>` matching it. No secret is ever logged.
+ */
+function isAuthorized(request: Request, env: Env): boolean {
+  const expected = env.DJ_SHARED_KEY;
+  if (expected === undefined || expected === '') return true;
+  const headerKey = request.headers.get('X-DJ-Key');
+  if (headerKey !== null && headerKey === expected) return true;
+  const auth = request.headers.get('Authorization');
+  if (auth !== null && auth === `Bearer ${expected}`) return true;
+  return false;
 }
 
 async function readJsonBody(request: Request): Promise<unknown> {
@@ -353,9 +380,9 @@ function anthropicToOpenAiStream(upstream: ReadableStream<Uint8Array>): Readable
                 `data: ${JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] })}\n\n`,
               ),
             );
-          } else if (event.type === 'message_stop') {
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           }
+          // message_stop carries no text: [DONE] is emitted exactly once
+          // at stream end below, never here.
         }
       }
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -382,7 +409,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
       method: 'POST',
       headers,
       body,
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
     });
   } catch {
     return errorJson('cloud provider unreachable', 502);
@@ -511,10 +538,19 @@ export default {
         headers: {
           ...cors,
           'access-control-allow-methods': 'GET, POST, OPTIONS',
-          'access-control-allow-headers': 'content-type',
+          'access-control-allow-headers': 'content-type, x-dj-key, authorization',
           'access-control-max-age': '86400',
         },
       });
+    }
+
+    // Shared-key auth (only enforced when DJ_SHARED_KEY is set).
+    // /health stays open; OPTIONS preflight above already passed through.
+    const isProtectedRoute =
+      (request.method === 'POST' && (url.pathname === '/chat' || url.pathname === '/tts')) ||
+      (request.method === 'GET' && url.pathname === '/transcribe-token');
+    if (isProtectedRoute && !isAuthorized(request, env)) {
+      return withCors(errorJson('unauthorized', 401), cors);
     }
 
     let response: Response;

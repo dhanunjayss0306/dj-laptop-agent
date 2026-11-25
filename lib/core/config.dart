@@ -36,7 +36,7 @@ String getDownloadsDir(String home) => _join(home, 'Downloads');
 
 String _join(String a, String b, [String? c]) {
   final sep = Platform.pathSeparator;
-  var out = a.endsWith(sep) ? a : '$a$sep$b';
+  var out = a.endsWith(sep) ? '$a$b' : '$a$sep$b';
   if (c != null) out = '$out$sep$c';
   return out;
 }
@@ -107,6 +107,12 @@ class ConfigRepository {
             startAtLogin: saved['startAtLogin'] as bool?,
             trayNoteSeen: saved['trayNoteSeen'] as bool?,
             preferLocal: saved['preferLocal'] as bool?,
+            privacySensitivity: saved['privacySensitivity'] is num
+                ? (saved['privacySensitivity'] as num).toDouble()
+                : null,
+            privacyDetectShoulderSurfers:
+                saved['privacyDetectShoulderSurfers'] as bool?,
+            privacyStartOnLaunch: saved['privacyStartOnLaunch'] as bool?,
           );
         }
       } catch (_) {

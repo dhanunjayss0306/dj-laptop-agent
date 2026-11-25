@@ -14,6 +14,11 @@ bool isAuthError(int? statusCode) => statusCode == 401 || statusCode == 403;
 typedef CheckLocal = Future<LocalModelHealth> Function();
 typedef CheckCloud = Future<CloudHealth> Function();
 
+/// The Worker settings the cloud probe needs: the Worker URL and the
+/// provider name. A record (not CloudSettings) so this core file does
+/// not import the UI's app_state.dart, which imports this file.
+typedef WorkerCloudSettings = ({String workerUrl, String provider});
+
 class CapabilityProbes {
   final CheckLocal checkLocal;
   final CheckCloud checkCloud;
@@ -57,9 +62,26 @@ Future<LocalModelHealth> checkLocalModel({HttpClient? client}) async {
   return const LocalModelHealth(available: false, reason: 'local model not running');
 }
 
-/// Probe a cloud key: GET [base]/models with a 2 s timeout.
-/// 200 = valid; 401/403 = expired or invalid — fall back, never retry.
-Future<CloudHealth> checkCloudKey(AppConfig config, {HttpClient? client}) async {
+/// Probe the cloud layer.
+///
+/// When a Worker URL is set ([workerUrl], from dj_cloud.json), the
+/// Worker is the cloud layer: it is reported configured and available,
+/// with the provider name carried in [CloudHealth.reason] so the badge
+/// and Settings card can show it (e.g. "Cloud (gemini)"). There is no
+/// provider key in the app to validate — the key lives only as a
+/// Worker secret — so no network call is made here; a live check
+/// happens on the first real Worker call. When no Worker URL is set,
+/// fall back to the legacy probe of a provider API key in [config].
+Future<CloudHealth> checkCloudKey(AppConfig config,
+    {HttpClient? client, String? workerUrl, String? workerProvider}) async {
+  final url = workerUrl?.trim() ?? '';
+  if (url.isNotEmpty) {
+    final provider = workerProvider?.trim() ?? '';
+    return CloudHealth(
+        configured: true,
+        valid: true,
+        reason: provider.isEmpty ? null : provider);
+  }
   final cloud = config.cloud;
   final apiKey = cloud?.apiKey;
   if (apiKey == null || apiKey.isEmpty) {
@@ -119,12 +141,23 @@ class CapabilityManager {
 
   CapabilityManager({required this.probes, this.cacheMs = 30000});
 
-  /// Default probes wired to a config loader.
-  factory CapabilityManager.withDefaultProbes(AppConfig Function() loadConfig) =>
+  /// Default probes wired to a config loader. [loadWorkerCloud], when
+  /// given, supplies the Worker settings from dj_cloud.json so the
+  /// cloud probe reflects a configured Worker URL (see checkCloudKey);
+  /// without it, only the legacy provider key in [AppConfig] is probed.
+  factory CapabilityManager.withDefaultProbes(AppConfig Function() loadConfig,
+          {WorkerCloudSettings Function()? loadWorkerCloud}) =>
       CapabilityManager(
         probes: CapabilityProbes(
           checkLocal: checkLocalModel,
-          checkCloud: () => checkCloudKey(loadConfig()),
+          checkCloud: () {
+            final worker = loadWorkerCloud?.call();
+            return checkCloudKey(
+              loadConfig(),
+              workerUrl: worker?.workerUrl,
+              workerProvider: worker?.provider,
+            );
+          },
         ),
       );
 
@@ -145,7 +178,12 @@ class CapabilityManager {
     String message;
     if (cloud.configured && cloud.valid == true) {
       layer = 'cloud';
-      message = 'Cloud${local.available ? ' (local model also available)' : ''}';
+      // When the cloud is a configured Worker, cloud.reason carries the
+      // provider name (see checkCloudKey); a legacy key has no reason.
+      final provider =
+          cloud.reason != null && cloud.reason!.isNotEmpty ? ' (${cloud.reason})' : '';
+      message =
+          'Cloud$provider${local.available ? ' (local model also available)' : ''}';
     } else if (local.available) {
       layer = 'local';
       final cloudNote = cloud.configured && cloud.valid == false

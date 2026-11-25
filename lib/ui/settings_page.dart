@@ -25,6 +25,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _workerUrl;
   late String _provider;
   late final TextEditingController _model;
+  late final TextEditingController _sharedKey;
   bool _cloudSaved = false;
 
   late String _localKind;
@@ -44,6 +45,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _model = TextEditingController(
       text: DjAppState.effectiveCloudModel(cloud),
     );
+    _sharedKey = TextEditingController(text: cloud.sharedKey);
     final picked = widget.app.config.value.localModel;
     _localKind = picked?.kind == 'lmstudio' ? 'lmstudio' : 'ollama';
     _localModel = TextEditingController(text: picked?.model ?? '');
@@ -54,6 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _workerUrl.dispose();
     _model.dispose();
+    _sharedKey.dispose();
     _localModel.dispose();
     super.dispose();
   }
@@ -132,7 +135,9 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                           ),
                         const SizedBox(height: 12),
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
                             OutlinedButton(
                               onPressed: () => showFoldersDialog(
@@ -142,7 +147,6 @@ class _SettingsPageState extends State<SettingsPage> {
                               ),
                               child: const Text('Folders'),
                             ),
-                            const SizedBox(width: 8),
                             OutlinedButton(
                               onPressed: () => widget.app.rebuildIndex(),
                               child: const Text('Rebuild index'),
@@ -369,6 +373,24 @@ class _SettingsPageState extends State<SettingsPage> {
                               setState(() => _cloudSaved = false),
                         ),
                         const SizedBox(height: 12),
+                        const Text('Shared key'),
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: _sharedKey,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            hintText:
+                                'Optional — must match the Worker DJ_SHARED_KEY secret',
+                          ),
+                          onChanged: (_) =>
+                              setState(() => _cloudSaved = false),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Leave blank when the Worker has no shared key '
+                          'set — DJ then sends no key and keeps working.',
+                        ),
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             ElevatedButton(
@@ -378,6 +400,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                     workerUrl: _workerUrl.text.trim(),
                                     provider: _provider,
                                     model: _model.text.trim(),
+                                    sharedKey: _sharedKey.text.trim(),
                                   ),
                                 );
                                 setState(() => _cloudSaved = true);
@@ -459,7 +482,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           'model answers first.',
                         ),
                         const SizedBox(height: 12),
-                        Row(
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
                             OutlinedButton(
                               onPressed:
@@ -468,7 +493,6 @@ class _SettingsPageState extends State<SettingsPage> {
                                   ? 'Checking...'
                                   : 'Check local models'),
                             ),
-                            const SizedBox(width: 8),
                             ElevatedButton(
                               onPressed: () async {
                                 final model = _localModel.text.trim();

@@ -2,7 +2,9 @@
 //
 // The app NEVER holds an AI provider key. All provider calls go through the
 // Worker (see worker/src/index.ts); this client only knows the Worker URL.
-// No API key field exists anywhere in this file.
+// The only key-like value here is the optional [WorkerClient.sharedKey]:
+// a shared secret the Worker itself checks (header `X-DJ-Key`), never a
+// provider key, and it is sent only when it is non-empty.
 //
 // Behaviour (PORTING-SPEC.md §3.3):
 // - chat() streams the reply text (the Worker normalises every provider to
@@ -96,17 +98,26 @@ class WorkerClient {
   /// [baseUrl] is the Worker URL, e.g.
   /// `https://dj-proxy.<subdomain>.workers.dev` (no trailing slash needed).
   /// [httpClient] is injectable for tests; pass nothing in the app.
+  /// [sharedKey] is the optional shared secret the Worker checks as the
+  /// `X-DJ-Key` header on every call. Empty (the default) sends no
+  /// header; the Worker only enforces a key when its DJ_SHARED_KEY
+  /// secret is set, so an empty key keeps the app working.
   WorkerClient(
     String baseUrl, {
     HttpClient? httpClient,
     this.timeout = const Duration(seconds: 10),
+    String sharedKey = '',
   })  : baseUrl = baseUrl.endsWith('/')
             ? baseUrl.substring(0, baseUrl.length - 1)
             : baseUrl,
+        sharedKey = sharedKey.trim(),
         _client = httpClient ?? HttpClient();
 
   final String baseUrl;
   final Duration timeout;
+
+  /// Optional Worker shared key, sent as `X-DJ-Key` when non-empty.
+  final String sharedKey;
   final HttpClient _client;
 
   /// Stream the chat reply text for [provider]/[model]/[messages].
@@ -183,8 +194,17 @@ class WorkerClient {
   /// Close the underlying HttpClient when the app shuts down.
   void close() => _client.close(force: true);
 
-  Future<HttpClientRequest> _open(String method, String path) =>
-      _client.openUrl(method, Uri.parse('$baseUrl$path')).timeout(timeout);
+  /// Every Worker call goes through here, so the shared key (when set)
+  /// is sent on chat, tts, transcribe-token and health alike, and
+  /// nothing is sent when no key is configured.
+  Future<HttpClientRequest> _open(String method, String path) async {
+    final request =
+        await _client.openUrl(method, Uri.parse('$baseUrl$path')).timeout(timeout);
+    if (sharedKey.isNotEmpty) {
+      request.headers.set('X-DJ-Key', sharedKey);
+    }
+    return request;
+  }
 
   /// Throws [CloudKeyExpired] on 401/403, [WorkerException] otherwise.
   /// Consumes the body so the connection can be reused.

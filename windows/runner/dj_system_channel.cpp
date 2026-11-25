@@ -27,29 +27,61 @@ constexpr const wchar_t kRunKeyPath[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr const wchar_t kRunValueName[] = L"DJ";
 
-// CPU% from two GetSystemTimes samples 500 ms apart (same approach as the
-// Electron app's two os.cpus() samples). Returns -1.0 when unmeasurable
-// (identical/backwards samples); the Dart side then reports CPU as
-// unavailable instead of inventing a number.
+// CPU% from the delta between this GetSystemTimes sample and the previous
+// one (same formula as the Electron app's two os.cpus() samples, but the
+// previous sample is the one from the last stats poll instead of a fresh
+// sample taken 500 ms later — no Sleep on the UI thread, so a stats poll
+// never stalls it). Returns -1.0 when unmeasurable (first call, no
+// previous sample yet, GetSystemTimes failure, or identical/backwards
+// samples); the Dart side then reports CPU as unavailable instead of
+// inventing a number.
 double SampleCpuPercent() {
-  FILETIME idle1{}, kernel1{}, user1{};
-  if (!::GetSystemTimes(&idle1, &kernel1, &user1)) {
-    return -1.0;
-  }
-  ::Sleep(500);
-  FILETIME idle2{}, kernel2{}, user2{};
-  if (!::GetSystemTimes(&idle2, &kernel2, &user2)) {
-    return -1.0;
-  }
+  // Previous sample, kept across polls. Static locals: this function is
+  // only ever called from the method-call handler on the UI thread, so
+  // no locking is needed.
+  static bool has_previous = false;
+  static uint64_t prev_idle = 0;
+  static uint64_t prev_kernel = 0;
+  static uint64_t prev_user = 0;
+
   const auto to_u64 = [](const FILETIME& ft) {
     ULARGE_INTEGER v{};
     v.LowPart = ft.dwLowDateTime;
     v.HighPart = ft.dwHighDateTime;
     return v.QuadPart;
   };
-  const uint64_t idle_delta = to_u64(idle2) - to_u64(idle1);
-  const uint64_t kernel_delta = to_u64(kernel2) - to_u64(kernel1);
-  const uint64_t user_delta = to_u64(user2) - to_u64(user1);
+  FILETIME idle{}, kernel{}, user{};
+  if (!::GetSystemTimes(&idle, &kernel, &user)) {
+    return -1.0;
+  }
+  const uint64_t cur_idle = to_u64(idle);
+  const uint64_t cur_kernel = to_u64(kernel);
+  const uint64_t cur_user = to_u64(user);
+  if (!has_previous) {
+    // First call: nothing to compare against yet. Store this sample so
+    // the next poll can compute a delta, and report unmeasurable.
+    prev_idle = cur_idle;
+    prev_kernel = cur_kernel;
+    prev_user = cur_user;
+    has_previous = true;
+    return -1.0;
+  }
+  if (cur_idle < prev_idle || cur_kernel < prev_kernel ||
+      cur_user < prev_user) {
+    // Sample went backwards; resync on the current sample and report
+    // this poll as unmeasurable rather than computing a bogus delta.
+    prev_idle = cur_idle;
+    prev_kernel = cur_kernel;
+    prev_user = cur_user;
+    return -1.0;
+  }
+  const uint64_t idle_delta = cur_idle - prev_idle;
+  const uint64_t kernel_delta = cur_kernel - prev_kernel;
+  const uint64_t user_delta = cur_user - prev_user;
+  // This sample becomes the baseline for the next poll.
+  prev_idle = cur_idle;
+  prev_kernel = cur_kernel;
+  prev_user = cur_user;
   const uint64_t total_delta = kernel_delta + user_delta;
   if (total_delta == 0 || idle_delta > total_delta) {
     return -1.0;

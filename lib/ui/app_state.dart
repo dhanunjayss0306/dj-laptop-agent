@@ -52,10 +52,16 @@ class CloudSettings {
   /// Model name for the provider. Empty = the provider's free default.
   /// Model names change often, so this is a free-text field in Settings.
   final String model;
+  /// Optional shared key the Worker checks as `X-DJ-Key` (see
+  /// WorkerClient). Empty = no key is sent; the Worker only enforces
+  /// a key when its DJ_SHARED_KEY secret is set. Stored on this
+  /// laptop only, never logged.
+  final String sharedKey;
   const CloudSettings({
     this.workerUrl = '',
     this.provider = 'gemini',
     this.model = '',
+    this.sharedKey = '',
   });
 }
 
@@ -84,8 +90,13 @@ class DjAppState {
       preferLocal: config.value.preferLocal ?? false,
     );
     _refreshChatCloud();
-    capability =
-        CapabilityManager.withDefaultProbes(() => config.value);
+    capability = CapabilityManager.withDefaultProbes(
+      () => config.value,
+      loadWorkerCloud: () {
+        final cloud = loadCloudSettings();
+        return (workerUrl: cloud.workerUrl, provider: cloud.provider);
+      },
+    );
     memory = MemoryFiles(dataDir);
     hotkeyChannel = HotkeyChannel();
     floatingButtonChannel = FloatingButtonChannel();
@@ -268,10 +279,12 @@ class DjAppState {
       if (data is! Map<String, dynamic>) return const CloudSettings();
       final provider = data['provider'] as String?;
       final model = data['model'] as String?;
+      final sharedKey = data['sharedKey'] as String?;
       return CloudSettings(
         workerUrl: data['workerUrl'] as String? ?? '',
         provider: _isKnownProvider(provider) ? provider! : 'gemini',
         model: model ?? '',
+        sharedKey: sharedKey ?? '',
       );
     } catch (_) {
       return const CloudSettings();
@@ -285,6 +298,7 @@ class DjAppState {
         'workerUrl': settings.workerUrl,
         'provider': settings.provider,
         'model': settings.model,
+        'sharedKey': settings.sharedKey,
       }),
       encoding: utf8,
     );
@@ -339,6 +353,10 @@ class DjAppState {
   /// the cloud settings are saved.
   void _refreshChatCloud() {
     final cloud = loadCloudSettings();
+    // Close the previous client before replacing it: each
+    // WorkerClient owns an HttpClient, and dropping it without
+    // closing leaks its connections.
+    chat.cloud?.close();
     chat.cloud = buildWorkerClient();
     chat.cloudProvider = providerFor(cloud.provider);
     chat.cloudModel = effectiveCloudModel(cloud);
@@ -349,9 +367,10 @@ class DjAppState {
   /// A client for the saved Worker URL, or null when no URL is set.
   /// The caller owns the client and should close it when done.
   WorkerClient? buildWorkerClient() {
-    final url = loadCloudSettings().workerUrl.trim();
+    final cloud = loadCloudSettings();
+    final url = cloud.workerUrl.trim();
     if (url.isEmpty) return null;
-    return WorkerClient(url);
+    return WorkerClient(url, sharedKey: cloud.sharedKey);
   }
 
   /// Vision model for a saved provider: the provider's default model.
@@ -552,7 +571,15 @@ String embedderLabel(DjStatus? status) {
 
 /// Cloud key line for the StatusCards Model card.
 String cloudKeyLine(CapabilityStatus cap) {
-  if (cap.cloud.valid == true) return 'Cloud key works';
+  if (cap.cloud.valid == true) {
+    // A configured Worker carries its provider name in cloud.reason
+    // (see checkCloudKey); a legacy key has no reason.
+    final provider = cap.cloud.reason;
+    if (provider != null && provider.isNotEmpty) {
+      return 'Cloud works via $provider';
+    }
+    return 'Cloud key works';
+  }
   if (cap.cloud.valid == false) return 'Cloud key expired or invalid';
   if (cap.cloud.configured) return 'Cloud key set, not checked yet';
   return 'No cloud key set';

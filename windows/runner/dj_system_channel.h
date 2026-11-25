@@ -9,8 +9,9 @@
 //   deleteToTrash         : SHFileOperationW, FO_DELETE + FOF_ALLOWUNDO
 //                           (Recycle Bin). There is NO permanent delete here.
 //   getSystemStats        : GetSystemInfo, GlobalMemoryStatusEx,
-//                           GetTickCount64, GetSystemTimes (two samples,
-//                           500 ms apart, like the Electron two-sample CPU%)
+//                           GetTickCount64, GetSystemTimes (delta between
+//                           consecutive polls; -1.0 on the first poll, no
+//                           sleep on the UI thread)
 //   setStartAtLogin       : RegSetValueExW / RegDeleteValueW on
 //                           HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 //                           value name "DJ", data = this exe's full path.

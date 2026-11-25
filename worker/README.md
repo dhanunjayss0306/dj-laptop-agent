@@ -16,8 +16,20 @@ the providers, and the keys live only as Worker secrets.
 | `/tts` | POST | `{ text, voiceId? }` → audio bytes (`audio/mpeg`). Uses `ELEVENLABS_API_KEY`; `voiceId` defaults to the `ELEVENLABS_VOICE_ID` var. Text max 5000 characters. |
 | `/transcribe-token` | GET | `{ ok: true, token, expiresInSeconds: 300 }` — a short-lived AssemblyAI realtime token for the app's streaming transcription. **The raw AssemblyAI key is never returned.** |
 
-Every route: 10 s timeout per provider call. No message contents and no keys
+Every route: 120 s timeout for streaming chat responses, 10 s for
+non-streaming calls (TTS, transcribe token). No message contents and no keys
 are ever logged. Failures are `{ ok: false, message }`.
+
+**Shared key (optional auth):** set a `DJ_SHARED_KEY` secret with
+`npx wrangler secret put DJ_SHARED_KEY` and enter a key in DJ under
+**Settings → Cloud → Shared key**. The app then sends it as an
+`X-DJ-Key` header on `/chat`, `/tts` and `/transcribe-token`
+(`Authorization: Bearer <key>` is also accepted). The Worker enforces the
+key **only when the secret is set** — if `DJ_SHARED_KEY` is not set, those
+routes stay open as before, so set the secret to lock the proxy down.
+A request with a missing or wrong key gets
+`{ ok: false, message: "unauthorized" }` with status 401. `/health` is
+unauthenticated.
 
 **Key-expired signal (matches PORTING-SPEC.md §3.3):** if a provider answers
 401/403, the Worker returns that same status with
@@ -49,6 +61,10 @@ npx wrangler secret put NVIDIA_API_KEY
 npx wrangler secret put ASSEMBLYAI_API_KEY
 npx wrangler secret put ELEVENLABS_API_KEY
 
+# Optional: shared key that DJ clients must send (see "Shared key" above).
+# If you skip this, /chat, /tts and /transcribe-token stay open.
+npx wrangler secret put DJ_SHARED_KEY
+
 Only set the secrets for the providers you use — an unset secret only
 matters if DJ asks for that provider. The three free ones:
 
@@ -73,6 +89,11 @@ Wrangler prints the Worker URL, normally
 In DJ: **Settings → Cloud → Worker URL**, paste the Worker URL above. That is
 the only cloud setting the app holds. DJ's `dj_config.json` must **not**
 contain a `cloud.apiKey` any more — the key lives in the Worker now.
+
+If you set the `DJ_SHARED_KEY` secret, also enter the same key in DJ under
+**Settings → Cloud → Shared key** — the app sends it as the `X-DJ-Key`
+header. If no shared key is set on either side, leave the field empty and
+requests are sent without it.
 
 ## Test each route (replace the URL with yours)
 

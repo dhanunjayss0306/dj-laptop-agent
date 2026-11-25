@@ -39,6 +39,13 @@ const List<(String title, IconData icon)> _pages = [
   ('Settings', Icons.settings),
 ];
 
+// Narrow screens (<700px) show only these pages in the bottom bar:
+// 5 items fit a phone width without truncating labels. The other
+// pages live in the drawer (see _drawerIndices). _pages keeps its
+// order: the wide side navigation still lists all 11 in order.
+const List<int> _primaryIndices = [0, 1, 7, 8, 10];
+const List<int> _drawerIndices = [2, 3, 4, 5, 6, 9];
+
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.app});
 
@@ -50,8 +57,20 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _current = 0;
+  // Last primary tab shown in the bottom bar. When the current page
+  // is a drawer-only page, the bottom bar keeps highlighting this
+  // tab instead of pointing at the wrong page.
+  int _lastPrimary = 0;
   StreamSubscription<void>? _hotkeySub;
   bool _screenQaRunning = false;
+
+  void _selectPage(int page) {
+    setState(() {
+      _current = page;
+      final primary = _primaryIndices.indexOf(page);
+      if (primary != -1) _lastPrimary = primary;
+    });
+  }
 
   @override
   void initState() {
@@ -83,7 +102,7 @@ class _HomeShellState extends State<HomeShell> {
       context,
       widget.app,
       PaletteActions(
-        goToPage: (page) => setState(() => _current = page),
+        goToPage: _selectPage,
         rebuildIndex: () => widget.app.rebuildIndex(),
         openFolders: () => showFoldersDialog(
           context,
@@ -110,6 +129,11 @@ class _HomeShellState extends State<HomeShell> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 700;
+            // Bottom-bar position of the current page; drawer-only
+            // pages leave the last primary tab highlighted.
+            final primaryIndex = _primaryIndices.indexOf(_current);
+            final bottomIndex =
+                primaryIndex == -1 ? _lastPrimary : primaryIndex;
             return Scaffold(
               appBar: AppBar(
                 title: const Text('DJ'),
@@ -161,8 +185,7 @@ class _HomeShellState extends State<HomeShell> {
                               _SideNav(
                                 app: app,
                                 current: _current,
-                                onSelect: (i) =>
-                                    setState(() => _current = i),
+                                onSelect: _selectPage,
                               ),
                               const VerticalDivider(width: 1),
                               Expanded(child: _body()),
@@ -173,16 +196,33 @@ class _HomeShellState extends State<HomeShell> {
                   _Footer(app: app),
                 ],
               ),
+              // Narrow screens get a drawer for the pages that do
+              // not fit in the bottom bar; its hamburger icon
+              // appears in the AppBar automatically.
+              drawer: wide
+                  ? null
+                  : Drawer(
+                      backgroundColor: const Color(0xFFFFFFFF),
+                      child: _NarrowDrawer(
+                        current: _current,
+                        onSelect: _selectPage,
+                      ),
+                    ),
               bottomNavigationBar: wide
                   ? null
                   : BottomNavigationBar(
-                      currentIndex: _current,
-                      onTap: (i) => setState(() => _current = i),
+                      currentIndex: bottomIndex,
+                      onTap: (i) => _selectPage(_primaryIndices[i]),
+                      // Material 3 defaults (14/12) truncate the
+                      // "Command Center" label in a fifth of a phone
+                      // width; 11 keeps all five labels readable.
+                      selectedFontSize: 11,
+                      unselectedFontSize: 11,
                       items: [
-                        for (final (title, icon) in _pages)
+                        for (final i in _primaryIndices)
                           BottomNavigationBarItem(
-                            icon: Icon(icon, size: 22),
-                            label: title,
+                            icon: Icon(_pages[i].$2, size: 22),
+                            label: _pages[i].$1,
                           ),
                       ],
                     ),
@@ -280,6 +320,52 @@ class _SideNav extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// Drawer content on narrow screens: the pages that do not fit in
+// the 5-item bottom bar. Same titles, icons and order as _pages.
+class _NarrowDrawer extends StatelessWidget {
+  const _NarrowDrawer({
+    required this.current,
+    required this.onSelect,
+  });
+
+  final int current;
+  final void Function(int index) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+          decoration: const BoxDecoration(
+            border: Border(
+                bottom: BorderSide(color: Color(0xFFE5E5E5))),
+          ),
+          child: const Text(
+            'More',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        for (final i in _drawerIndices)
+          ListTile(
+            leading: Icon(_pages[i].$2, size: 20),
+            title: Text(_pages[i].$1),
+            selected: current == i,
+            selectedTileColor: const Color(0xFFF5F5F7),
+            onTap: () {
+              Navigator.of(context).pop();
+              onSelect(i);
+            },
+          ),
+      ],
     );
   }
 }
