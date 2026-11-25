@@ -4,6 +4,7 @@
 
 #include <flutter/standard_method_codec.h>
 
+#include <windows.h>
 #include <gdiplus.h>
 
 #include <cstdint>

@@ -20,6 +20,8 @@
 #include <flutter/binary_messenger.h>
 #include <flutter/method_channel.h>
 
+#include <windows.h>
+
 #include <memory>
 
 namespace dj {
