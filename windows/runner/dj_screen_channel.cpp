@@ -8,6 +8,8 @@
 #include <gdiplus.h>
 
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "dj_channel_utils.h"

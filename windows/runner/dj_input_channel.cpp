@@ -9,10 +9,13 @@
 
 #include <flutter/standard_method_codec.h>
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cctype>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "dj_channel_utils.h"

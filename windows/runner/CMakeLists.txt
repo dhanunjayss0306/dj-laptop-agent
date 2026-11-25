@@ -43,15 +43,21 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # DJ native channels: shell32 (ShellExecuteW, SHFileOperationW,
-# SHGetKnownFolderPath), ole32 (IFileDialog COM), sapi (ISpVoice TTS),
-# winhttp (whisper-server inference POST), gdiplus (screenshot PNG encode),
-# mfplat/mf/mfreadwrite/mfuuid/shlwapi (Privacy Screen in-memory webcam
-# capture via Media Foundation).
+# SHGetKnownFolderPath), ole32 (IFileDialog COM), uuid (COM GUIDs:
+# CLSID_FileOpenDialog, IID_IFileDialog/IShellItem, FOLDERID_*),
+# sapi (ISpVoice TTS), winhttp (whisper-server inference POST),
+# gdiplus (screenshot PNG encode), mfplat/mf/mfreadwrite/mfuuid/shlwapi
+# (Privacy Screen in-memory webcam capture via Media Foundation).
+# NOTE: the KS property-set GUID (KSPROPERTYSETID_ExtendedCameraControl)
+# is deliberately NOT linked here: ksguid.lib is not shipped in the
+# Windows SDK, so dj_camera_channel.cpp instantiates it in its own
+# translation unit via <initguid.h> instead.
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib"
-                                             "sapi.lib" "winhttp.lib"
-                                             "gdiplus.lib" "mfplat.lib"
-                                             "mf.lib" "mfreadwrite.lib"
-                                             "mfuuid.lib" "shlwapi.lib")
+                                             "uuid.lib" "sapi.lib"
+                                             "winhttp.lib" "gdiplus.lib"
+                                             "mfplat.lib" "mf.lib"
+                                             "mfreadwrite.lib" "mfuuid.lib"
+                                             "shlwapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

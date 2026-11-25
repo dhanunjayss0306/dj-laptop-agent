@@ -12,6 +12,13 @@
 
 #include <windows.h>
 
+// <initguid.h> instantiates the DEFINE_GUID symbols from the KS headers
+// below (notably KSPROPERTYSETID_ExtendedCameraControl) in this
+// translation unit. Without it the GUID is only an extern declaration
+// and the link needs ksguid.lib, which the Windows SDK does not ship;
+// with it no extra library is required.
+#include <initguid.h>
+
 // ks.h must precede ksmedia.h and ksproxy.h.
 #include <ks.h>
 #include <ksmedia.h>
@@ -30,6 +37,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "dj_channel_utils.h"

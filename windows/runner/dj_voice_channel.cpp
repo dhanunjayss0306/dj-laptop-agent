@@ -13,6 +13,8 @@
 
 #include <cstring>
 #include <fstream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "dj_channel_utils.h"
@@ -409,7 +411,9 @@ void DjVoiceChannel::HandleMethodCall(
     while (::WinHttpQueryDataAvailable(request, &available) && available > 0) {
       while (available > 0) {
         const DWORD to_read =
-            available < sizeof(chunk) ? available : sizeof(chunk);
+            available < sizeof(chunk)
+                ? available
+                : static_cast<DWORD>(sizeof(chunk));
         if (!::WinHttpReadData(request, chunk, to_read, &read) || read == 0) {
           break;
         }

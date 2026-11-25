@@ -4,10 +4,18 @@
 
 #include <flutter/standard_method_codec.h>
 
+// <windows.h> must come first: <shlobj.h>/<shellapi.h>/<shobjidl.h> need
+// the Windows types, and this file previously only got <windows.h>
+// transitively (via dj_channel_utils.h, included last).
+#include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "dj_channel_utils.h"
 

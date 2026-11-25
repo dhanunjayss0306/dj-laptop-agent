@@ -16,7 +16,9 @@
 #include <flutter/encodable_value.h>
 #include <flutter/method_result.h>
 
+#include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 #include <windows.h>
 

@@ -4,6 +4,9 @@
 
 #include <shellapi.h>
 
+#include <utility>
+#include <wchar.h>
+
 #include "dj_channel_utils.h"
 
 namespace dj {

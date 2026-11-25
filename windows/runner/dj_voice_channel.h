@@ -32,6 +32,11 @@
 #include <string>
 #include <windows.h>
 
+// ISpVoice is declared here, not in <windows.h>: this header must include
+// <sapi.h> itself so it compiles standalone (a missing sapi.h here was the
+// same class of bug as the dj_screen_channel ULONG_PTR failure).
+#include <sapi.h>
+
 namespace dj {
 
 class DjVoiceChannel {
