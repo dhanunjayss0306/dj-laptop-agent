@@ -100,6 +100,12 @@ class ScreenCaptureHandler(private val activity: MainActivity) :
             var handlerThread: HandlerThread? = null
             try {
                 projection = manager.getMediaProjection(resultCode, data)
+                // getMediaProjection() can return null (the system can
+                // refuse the capture). Fail loudly here instead of
+                // calling createVirtualDisplay on a null projection —
+                // the catch below turns this into {"ok": false, ...}.
+                val proj = projection
+                    ?: throw IllegalStateException("could not create MediaProjection")
                 val metrics = activity.resources.displayMetrics
                 val width = metrics.widthPixels
                 val height = metrics.heightPixels
@@ -122,7 +128,7 @@ class ScreenCaptureHandler(private val activity: MainActivity) :
                     latch.countDown()
                 }, Handler(handlerThread.looper))
 
-                virtualDisplay = projection.createVirtualDisplay(
+                virtualDisplay = proj.createVirtualDisplay(
                     "dj-capture",
                     width,
                     height,

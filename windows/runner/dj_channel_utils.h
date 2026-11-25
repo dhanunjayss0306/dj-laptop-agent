@@ -14,6 +14,13 @@
 #define RUNNER_DJ_CHANNEL_UTILS_H_
 
 #include <flutter/encodable_value.h>
+// flutter::MethodCall is used by every Get*Arg helper below. It is
+// declared in <flutter/method_call.h> — neither encodable_value.h nor
+// method_result.h provides it (method_result.h only includes <string>),
+// so this header must include it itself. A missing method_call.h here
+// was the v1.2.3 Windows build failure (C2039 'MethodCall' is not a
+// member of 'flutter').
+#include <flutter/method_call.h>
 #include <flutter/method_result.h>
 
 #include <cstdint>
