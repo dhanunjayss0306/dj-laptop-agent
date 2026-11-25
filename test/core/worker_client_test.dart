@@ -181,6 +181,47 @@ void main() {
       expect(text, ['Hello ', 'world']);
     });
 
+    test('free providers send the right provider and model, no key', () async {
+      // provider → (model, expected body fragment)
+      const cases = {
+        CloudProvider.gemini: 'gemini-3.8-flash',
+        CloudProvider.groq: 'openai/gpt-oss-120b',
+        CloudProvider.nvidia: 'nvidia/nemotron-3-super-120b-a12b',
+      };
+      for (final entry in cases.entries) {
+        const sse =
+            'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            'data: [DONE]\n\n';
+        final fake = FakeHttpClient(200, sse);
+        final client = WorkerClient(
+          'https://dj-proxy.test.workers.dev',
+          httpClient: fake,
+        );
+
+        final text = await client
+            .chat(
+              provider: entry.key,
+              model: entry.value,
+              messages: const [
+                ChatMessage(role: 'user', content: 'hi'),
+              ],
+            )
+            .toList();
+
+        expect(text, ['ok']);
+        expect(fake.lastMethod, 'POST');
+        expect(fake.lastUri!.path, '/chat');
+        final headers = fake.lastRequest!.headers as FakeHttpHeaders;
+        expect(headers.values.containsKey('authorization'), isFalse);
+        expect(headers.values.containsKey('x-api-key'), isFalse);
+        final body = fake.lastRequest!.bodyBuffer.toString();
+        expect(body, contains('"provider":"${entry.key.name}"'));
+        expect(body, contains('"model":"${entry.value}"'));
+        expect(body.toLowerCase(), isNot(contains('apikey')));
+        expect(body.toLowerCase(), isNot(contains('api_key')));
+      }
+    });
+
     test('non-auth failure becomes WorkerException with plain message',
         () async {
       final fake = FakeHttpClient(

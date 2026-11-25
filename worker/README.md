@@ -1,8 +1,9 @@
 # dj-proxy — DJ's Cloudflare Worker API-key proxy
 
 DJ's Cloud layer (Layer 2, PORTING-SPEC.md §3.3) talks to OpenAI, OpenRouter
-and Anthropic for chat, AssemblyAI for streaming transcription, and
-ElevenLabs for text-to-speech. **The API keys must never ship inside the app.**
+and Anthropic for chat, plus the three free providers — **Gemini, Groq and
+NVIDIA NIM** — and AssemblyAI for streaming transcription, and ElevenLabs
+for text-to-speech. **The API keys must never ship inside the app.**
 This Worker sits in between: the app talks to the Worker, the Worker talks to
 the providers, and the keys live only as Worker secrets.
 
@@ -11,7 +12,7 @@ the providers, and the keys live only as Worker secrets.
 | Route | Method | Body / result |
 |---|---|---|
 | `/health` | GET | `{ ok: true }` — the app checks the Worker is up. |
-| `/chat` | POST | `{ provider: "openai" \| "openrouter" \| "anthropic", model, messages: [{ role, content }] }` → streamed reply as OpenAI-style SSE (`data: {"choices":[{"delta":{"content":"..."}}]}`, ends with `data: [DONE]`). Anthropic's different request/response shape is handled inside the Worker and its stream is converted to the same OpenAI-style SSE, so the app parses one shape. |
+| `/chat` | POST | `{ provider: "openai" \| "openrouter" \| "anthropic" \| "gemini" \| "groq" \| "nvidia", model, messages: [{ role, content }] }` → streamed reply as OpenAI-style SSE (`data: {"choices":[{"delta":{"content":"..."}}]}`, ends with `data: [DONE]`). Anthropic's different request/response shape is handled inside the Worker and its stream is converted to the same OpenAI-style SSE, so the app parses one shape. Gemini, Groq and NVIDIA NIM all speak OpenAI-compatible `/chat/completions`, so their streams pass through as-is. |
 | `/tts` | POST | `{ text, voiceId? }` → audio bytes (`audio/mpeg`). Uses `ELEVENLABS_API_KEY`; `voiceId` defaults to the `ELEVENLABS_VOICE_ID` var. Text max 5000 characters. |
 | `/transcribe-token` | GET | `{ ok: true, token, expiresInSeconds: 300 }` — a short-lived AssemblyAI realtime token for the app's streaming transcription. **The raw AssemblyAI key is never returned.** |
 
@@ -38,12 +39,24 @@ Prerequisites: a free Cloudflare account, Node.js 18+.
 cd worker
 npm install
 
-# 2. Set the 5 secrets (wrangler prompts for each value; nothing is written to a file)
+# 2. Set the 8 secrets (wrangler prompts for each value; nothing is written to a file)
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put GROQ_API_KEY
+npx wrangler secret put NVIDIA_API_KEY
 npx wrangler secret put ASSEMBLYAI_API_KEY
 npx wrangler secret put ELEVENLABS_API_KEY
+
+Only set the secrets for the providers you use — an unset secret only
+matters if DJ asks for that provider. The three free ones:
+
+| Provider | Where to create the key | Cost |
+|---|---|---|
+| Gemini | Google AI Studio — https://aistudio.google.com → **Get API key** → create in a project (free, no card) | Free tier (Flash models) |
+| Groq | https://console.groq.com → **API Keys** → **Create API Key** (free, no card) | Free tier (1,000 requests/day on gpt-oss-120b) |
+| NVIDIA NIM | https://build.nvidia.com → sign in with a free NVIDIA Developer Program account → **API Keys** → **Generate** | Free for prototyping |
 
 # 3. (Optional) set your default ElevenLabs voice id in wrangler.toml
 #    (ELEVENLABS_VOICE_ID) — it is not a secret, so it can live in the file.
@@ -79,6 +92,21 @@ curl -N -X POST $URL/chat \
 curl -N -X POST $URL/chat \
   -H 'content-type: application/json' \
   -d '{"provider":"anthropic","model":"claude-sonnet-4-5","messages":[{"role":"user","content":"Say hi in five words."}]}'
+
+# chat (Gemini, free) — same SSE shape back
+curl -N -X POST $URL/chat \
+  -H 'content-type: application/json' \
+  -d '{"provider":"gemini","model":"gemini-3.8-flash","messages":[{"role":"user","content":"Say hi in five words."}]}'
+
+# chat (Groq, free) — same SSE shape back
+curl -N -X POST $URL/chat \
+  -H 'content-type: application/json' \
+  -d '{"provider":"groq","model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"Say hi in five words."}]}'
+
+# chat (NVIDIA NIM, free for prototyping) — same SSE shape back
+curl -N -X POST $URL/chat \
+  -H 'content-type: application/json' \
+  -d '{"provider":"nvidia","model":"nvidia/nemotron-3-super-120b-a12b","messages":[{"role":"user","content":"Say hi in five words."}]}'
 
 # tts — saves an mp3
 curl -X POST $URL/tts \

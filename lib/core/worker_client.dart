@@ -35,7 +35,11 @@ class CloudKeyExpired extends WorkerException {
 }
 
 /// Cloud providers the Worker can forward chat to (PORTING-SPEC.md §3.3).
-enum CloudProvider { openai, openrouter, anthropic }
+/// gemini, groq and nvidia are the free ones (keys live only as Worker
+/// secrets). gemini's default model is multimodal; groq/nvidia defaults
+/// are text-only, so a screenshot question with those providers fails
+/// with a plain message — use Gemini or OpenAI for screen questions.
+enum CloudProvider { openai, openrouter, anthropic, gemini, groq, nvidia }
 
 extension on CloudProvider {
   String get apiName => name;
@@ -47,9 +51,10 @@ extension on CloudProvider {
 /// A message with [imageBase64] sends `content` as an OpenAI-style
 /// parts array: a text part plus an `image_url` part whose URL is a
 /// `data:` URL (`data:<mime>;base64,...`). The Worker forwards that
-/// shape to OpenAI/OpenRouter as-is and converts it to Anthropic
-/// image blocks for Anthropic. The model must be vision-capable
-/// (for example gpt-4o or claude-sonnet-4) or the provider rejects it.
+/// shape to OpenAI/OpenRouter/Gemini/Groq/NVIDIA as-is and converts it
+/// to Anthropic image blocks for Anthropic. The model must be
+/// vision-capable (for example gpt-4o, claude-sonnet-4-5, or
+/// gemini-3.8-flash) or the provider rejects it.
 class ChatMessage {
   const ChatMessage({
     required this.role,

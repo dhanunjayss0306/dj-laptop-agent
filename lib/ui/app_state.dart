@@ -44,8 +44,18 @@ import '../services/system_ops.dart';
 
 class CloudSettings {
   final String workerUrl;
-  final String provider; // 'openai' | 'openrouter' | 'anthropic'
-  const CloudSettings({this.workerUrl = '', this.provider = 'openai'});
+  // 'gemini' | 'groq' | 'nvidia' | 'openai' | 'openrouter' | 'anthropic'.
+  // Default is Gemini: the best free provider (research brain, big
+  // context). Keys never live here — only as Worker secrets.
+  final String provider;
+  /// Model name for the provider. Empty = the provider's free default.
+  /// Model names change often, so this is a free-text field in Settings.
+  final String model;
+  const CloudSettings({
+    this.workerUrl = '',
+    this.provider = 'gemini',
+    this.model = '',
+  });
 }
 
 class DjAppState {
@@ -228,11 +238,11 @@ class DjAppState {
       final data = jsonDecode(file.readAsStringSync());
       if (data is! Map<String, dynamic>) return const CloudSettings();
       final provider = data['provider'] as String?;
+      final model = data['model'] as String?;
       return CloudSettings(
         workerUrl: data['workerUrl'] as String? ?? '',
-        provider: provider == 'openrouter' || provider == 'anthropic'
-            ? provider!
-            : 'openai',
+        provider: _isKnownProvider(provider) ? provider! : 'gemini',
+        model: model ?? '',
       );
     } catch (_) {
       return const CloudSettings();
@@ -245,11 +255,55 @@ class DjAppState {
       const JsonEncoder.withIndent('  ').convert({
         'workerUrl': settings.workerUrl,
         'provider': settings.provider,
+        'model': settings.model,
       }),
       encoding: utf8,
     );
     _refreshChatCloud();
   }
+
+  /// True when [provider] is one of the six providers DJ knows.
+  /// Anything else is not a provider DJ can talk to.
+  static bool _isKnownProvider(String? provider) =>
+      provider == 'gemini' ||
+      provider == 'groq' ||
+      provider == 'nvidia' ||
+      provider == 'openai' ||
+      provider == 'openrouter' ||
+      provider == 'anthropic';
+
+  /// Free default model per cloud provider. Model names change, so the
+  /// Settings field lets the user type a newer one; this is only the
+  /// starting point. Gemini 3.8 Flash is the current stable free Flash
+  /// model (verified Nov 2026); Groq's gpt-oss-120b is free at
+  /// 1,000 requests/day; NVIDIA's Nemotron 3 Super is free for
+  /// prototyping on NIM.
+  static String defaultCloudModel(String provider) => switch (provider) {
+        'gemini' => 'gemini-3.8-flash',
+        'groq' => 'openai/gpt-oss-120b',
+        'nvidia' => 'nvidia/nemotron-3-super-120b-a12b',
+        'anthropic' => 'claude-sonnet-4-5',
+        _ => 'gpt-4o',
+      };
+
+  /// The model DJ actually asks: the saved one, or the provider's
+  /// free default when the field is empty.
+  static String effectiveCloudModel(CloudSettings settings) {
+    final saved = settings.model.trim();
+    return saved.isEmpty ? defaultCloudModel(settings.provider) : saved;
+  }
+
+  /// Map a saved provider name to the enum. Unknown names fall back to
+  /// Gemini (the free default) — they never reach the Worker, so the
+  /// Worker never sees a provider it does not know.
+  static CloudProvider providerFor(String provider) => switch (provider) {
+        'anthropic' => CloudProvider.anthropic,
+        'openrouter' => CloudProvider.openrouter,
+        'groq' => CloudProvider.groq,
+        'nvidia' => CloudProvider.nvidia,
+        'openai' => CloudProvider.openai,
+        _ => CloudProvider.gemini,
+      };
 
   /// Point the chat file-Q&A at the saved Worker settings (or clear
   /// it when no Worker URL is set). Called at startup and whenever
@@ -257,8 +311,8 @@ class DjAppState {
   void _refreshChatCloud() {
     final cloud = loadCloudSettings();
     chat.cloud = buildWorkerClient();
-    chat.cloudProvider = _providerFor(cloud.provider);
-    chat.cloudModel = visionModelFor(cloud.provider);
+    chat.cloudProvider = providerFor(cloud.provider);
+    chat.cloudModel = effectiveCloudModel(cloud);
   }
 
   // -- Cloud Worker client for ScreenQA -------------------------------
@@ -271,16 +325,14 @@ class DjAppState {
     return WorkerClient(url);
   }
 
-  /// Vision model for a saved provider: gpt-4o for openai/openrouter,
-  /// claude-sonnet-4-5 for anthropic.
+  /// Vision model for a saved provider: the provider's default model.
+  /// gemini-3.8-flash, gpt-4o and claude-sonnet-4-5 accept images, so
+  /// screen Q&A works with Gemini, OpenAI, OpenRouter and Anthropic.
+  /// Groq's and NVIDIA's defaults are text-only, so a screenshot
+  /// question with those providers fails with a plain message — use
+  /// Gemini or OpenAI for screen questions.
   static String visionModelFor(String provider) =>
-      provider == 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4o';
-
-  static CloudProvider _providerFor(String provider) => switch (provider) {
-        'anthropic' => CloudProvider.anthropic,
-        'openrouter' => CloudProvider.openrouter,
-        _ => CloudProvider.openai,
-      };
+      defaultCloudModel(provider);
 
   /// ScreenQA wired to the saved Cloud settings. When no Worker URL
   /// is set (or [client] is null), the returned ScreenQA has no
@@ -302,7 +354,7 @@ class DjAppState {
       voice: voiceChannel,
       visionChat: makeWorkerVisionChat(
         client,
-        provider: _providerFor(cloud.provider),
+        provider: providerFor(cloud.provider),
         model: visionModelFor(cloud.provider),
       ),
       modelUp: () => true,

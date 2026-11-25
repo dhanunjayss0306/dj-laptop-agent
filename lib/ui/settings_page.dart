@@ -24,6 +24,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _workerUrl;
   late String _provider;
+  late final TextEditingController _model;
   bool _cloudSaved = false;
 
   late String _localKind;
@@ -40,6 +41,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final cloud = widget.app.loadCloudSettings();
     _workerUrl = TextEditingController(text: cloud.workerUrl);
     _provider = cloud.provider;
+    _model = TextEditingController(
+      text: DjAppState.effectiveCloudModel(cloud),
+    );
     final picked = widget.app.config.value.localModel;
     _localKind = picked?.kind == 'lmstudio' ? 'lmstudio' : 'ollama';
     _localModel = TextEditingController(text: picked?.model ?? '');
@@ -49,6 +53,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _workerUrl.dispose();
+    _model.dispose();
     _localModel.dispose();
     super.dispose();
   }
@@ -255,7 +260,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           'Optional. DJ works fully without this. Keys live '
                           'in the Cloudflare Worker, never in the app. The '
                           'Worker URL is stored on this laptop only and '
-                          'never logged.',
+                          'never logged. Gemini, Groq and NVIDIA NIM are '
+                          'free — pick one, set its key as a Worker secret, '
+                          'and type the model name.',
                         ),
                         const SizedBox(height: 12),
                         const Text('Worker URL'),
@@ -275,21 +282,44 @@ class _SettingsPageState extends State<SettingsPage> {
                           value: _provider,
                           items: const [
                             DropdownMenuItem(
-                                value: 'openai', child: Text('openai')),
+                                value: 'gemini',
+                                child: Text('Gemini (free)')),
+                            DropdownMenuItem(
+                                value: 'groq', child: Text('Groq (free)')),
+                            DropdownMenuItem(
+                                value: 'nvidia',
+                                child: Text('NVIDIA NIM (free)')),
+                            DropdownMenuItem(
+                                value: 'openai', child: Text('OpenAI')),
                             DropdownMenuItem(
                                 value: 'openrouter',
-                                child: Text('openrouter')),
+                                child: Text('OpenRouter')),
                             DropdownMenuItem(
                                 value: 'anthropic',
-                                child: Text('anthropic')),
+                                child: Text('Anthropic')),
                           ],
                           onChanged: (value) {
                             if (value == null) return;
                             setState(() {
                               _provider = value;
+                              // Show the new provider's free default
+                              // model; the user can type a newer one.
+                              _model.text =
+                                  DjAppState.defaultCloudModel(value);
                               _cloudSaved = false;
                             });
                           },
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('Model'),
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: _model,
+                          decoration: const InputDecoration(
+                            hintText: 'gemini-3.8-flash',
+                          ),
+                          onChanged: (_) =>
+                              setState(() => _cloudSaved = false),
                         ),
                         const SizedBox(height: 12),
                         Row(
@@ -300,6 +330,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   CloudSettings(
                                     workerUrl: _workerUrl.text.trim(),
                                     provider: _provider,
+                                    model: _model.text.trim(),
                                   ),
                                 );
                                 setState(() => _cloudSaved = true);

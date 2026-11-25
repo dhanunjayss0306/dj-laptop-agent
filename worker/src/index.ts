@@ -4,7 +4,8 @@
 // app. The app talks only to this Worker; the Worker holds the keys as
 // Cloudflare secrets and forwards requests to the providers.
 //
-// Providers (PORTING-SPEC.md §3.3): openai, openrouter, anthropic.
+// Providers (PORTING-SPEC.md §3.3): openai, openrouter, anthropic, plus
+// the three free OpenAI-compatible ones: gemini, groq, nvidia.
 // Voice (PORTING-SPEC.md §4): AssemblyAI (streaming transcription token)
 // and ElevenLabs (text-to-speech).
 //
@@ -22,6 +23,14 @@ export interface Env {
   OPENAI_API_KEY: string;
   OPENROUTER_API_KEY: string;
   ANTHROPIC_API_KEY: string;
+  // Free providers (all OpenAI-compatible /chat/completions):
+  // Gemini — key from Google AI Studio (aistudio.google.com).
+  GEMINI_API_KEY: string;
+  // Groq — key from console.groq.com → API Keys.
+  GROQ_API_KEY: string;
+  // NVIDIA NIM — key from build.nvidia.com (free NVIDIA Developer
+  // Program account, prototyping only).
+  NVIDIA_API_KEY: string;
   ASSEMBLYAI_API_KEY: string;
   ELEVENLABS_API_KEY: string;
   /** Non-secret. Default ElevenLabs voice used when the app sends no voiceId. */
@@ -43,9 +52,16 @@ const ANTHROPIC_MAX_TOKENS = 4096;
 const ASSEMBLYAI_TOKEN_TTL_SECONDS = 300;
 const ELEVENLABS_MODEL_ID = 'eleven_turbo_v2_5';
 
-type Provider = 'openai' | 'openrouter' | 'anthropic';
+type Provider = 'openai' | 'openrouter' | 'anthropic' | 'gemini' | 'groq' | 'nvidia';
 
-const PROVIDERS: Provider[] = ['openai', 'openrouter', 'anthropic'];
+const PROVIDERS: Provider[] = [
+  'openai',
+  'openrouter',
+  'anthropic',
+  'gemini',
+  'groq',
+  'nvidia',
+];
 
 interface ChatTextPart {
   type: 'text';
@@ -259,16 +275,39 @@ function buildProviderRequest(
       }),
     };
   }
-  const url =
-    provider === 'openai'
-      ? 'https://api.openai.com/v1/chat/completions'
-      : 'https://openrouter.ai/api/v1/chat/completions';
-  const key = provider === 'openai' ? env.OPENAI_API_KEY : env.OPENROUTER_API_KEY;
+  // Every non-Anthropic provider speaks OpenAI-compatible
+  // /chat/completions (same request shape, Bearer key, streamed SSE).
+  // Gemini's endpoint is Google's OpenAI-compat base; Groq and NVIDIA
+  // NIM are OpenAI-compat by design. New providers only need one line
+  // here plus a secret in Env.
+  const compat: Record<Exclude<Provider, 'anthropic'>, { url: string; key: string }> = {
+    openai: {
+      url: 'https://api.openai.com/v1/chat/completions',
+      key: env.OPENAI_API_KEY,
+    },
+    openrouter: {
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      key: env.OPENROUTER_API_KEY,
+    },
+    gemini: {
+      url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      key: env.GEMINI_API_KEY,
+    },
+    groq: {
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      key: env.GROQ_API_KEY,
+    },
+    nvidia: {
+      url: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      key: env.NVIDIA_API_KEY,
+    },
+  };
+  const endpoint = compat[provider];
   return {
-    url,
+    url: endpoint.url,
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${key}`,
+      authorization: `Bearer ${endpoint.key}`,
       ...(provider === 'openrouter'
         ? { 'http-referer': 'https://dj-proxy.workers.dev', 'x-title': 'DJ' }
         : {}),
@@ -280,7 +319,8 @@ function buildProviderRequest(
 /**
  * Convert Anthropic's SSE stream into OpenAI-style SSE chunks
  * (data: {"choices":[{"delta":{"content":"..."}}]}) so the app only has to
- * parse one shape. OpenAI/OpenRouter streams pass through untouched.
+ * parse one shape. OpenAI/OpenRouter/Gemini/Groq/NVIDIA streams pass
+ * through untouched (they already speak OpenAI-style SSE).
  */
 function anthropicToOpenAiStream(upstream: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
