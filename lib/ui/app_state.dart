@@ -21,6 +21,7 @@ import 'package:flutter/material.dart';
 import '../core/agent_loop.dart';
 import '../core/capability.dart';
 import '../core/config.dart' as cfg;
+import '../core/local_model.dart';
 import '../core/models.dart';
 import '../core/worker_client.dart';
 import '../features/account/account.dart';
@@ -67,6 +68,9 @@ class DjAppState {
       getFolders: () => cfg.enabledFolders(config.value),
       systemOps: systemOps,
       duplicates: duplicates,
+      local: LocalModelClient(),
+      localModel: config.value.localModel,
+      preferLocal: config.value.preferLocal ?? false,
     );
     _refreshChatCloud();
     capability =
@@ -165,7 +169,17 @@ class DjAppState {
   Future<void> saveConfig(AppConfig next) async {
     configRepo.save(next);
     config.value = next;
+    _refreshChatLocal();
     await refreshStatus();
+  }
+
+  /// Point the chat file-Q&A at the saved local-model pick (server
+  /// + model name, and whether Local goes first). Called at startup
+  /// (via the ChatService constructor) and whenever settings are
+  /// saved.
+  void _refreshChatLocal() {
+    chat.localModel = config.value.localModel;
+    chat.preferLocal = config.value.preferLocal ?? false;
   }
 
   /// Full index rebuild over the enabled folders. Returns the counts,

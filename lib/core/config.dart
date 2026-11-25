@@ -106,6 +106,7 @@ class ConfigRepository {
                 : null,
             startAtLogin: saved['startAtLogin'] as bool?,
             trayNoteSeen: saved['trayNoteSeen'] as bool?,
+            preferLocal: saved['preferLocal'] as bool?,
           );
         }
       } catch (_) {

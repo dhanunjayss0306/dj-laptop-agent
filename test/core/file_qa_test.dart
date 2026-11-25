@@ -92,7 +92,7 @@ void main() {
       final r = await qa.ask('what does my Virun pitch say about pricing?');
       expect(r.kind, 'search');
       final s = r as ChatResponseSearch;
-      expect(s.text, contains('needs the cloud AI'));
+      expect(s.text, contains('needs an AI'));
       expect(s.results.first.name, 'virun-pitch.txt');
     });
 
@@ -120,13 +120,13 @@ void main() {
       expect(s.results.first.name, 'virun-pitch.txt');
     });
 
-    test('chat routes a question to ask and falls back without cloud',
+    test('chat routes a question to ask and falls back without any AI',
         () async {
       final r =
           await chat.handle('what does my Virun pitch say about pricing?');
       expect(r.kind, 'search');
       final s = r as ChatResponseSearch;
-      expect(s.text, contains('needs the cloud AI'));
+      expect(s.text, contains('No AI answered'));
       expect(s.results.first.name, 'virun-pitch.txt');
     });
   });

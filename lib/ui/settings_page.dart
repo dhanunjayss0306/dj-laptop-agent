@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/local_model.dart';
 import '../core/models.dart';
 import '../platform/update_note.dart';
 import 'app_state.dart';
@@ -25,18 +26,73 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _provider;
   bool _cloudSaved = false;
 
+  late String _localKind;
+  late final TextEditingController _localModel;
+  late bool _preferLocal;
+  bool _localSaved = false;
+  bool _localChecking = false;
+  String _localStatus = '';
+  List<String> _localFound = [];
+
   @override
   void initState() {
     super.initState();
     final cloud = widget.app.loadCloudSettings();
     _workerUrl = TextEditingController(text: cloud.workerUrl);
     _provider = cloud.provider;
+    final picked = widget.app.config.value.localModel;
+    _localKind = picked?.kind == 'lmstudio' ? 'lmstudio' : 'ollama';
+    _localModel = TextEditingController(text: picked?.model ?? '');
+    _preferLocal = widget.app.config.value.preferLocal ?? false;
   }
 
   @override
   void dispose() {
     _workerUrl.dispose();
+    _localModel.dispose();
     super.dispose();
+  }
+
+  /// Ask the laptop what local models are installed (Ollama first,
+  /// then LM Studio) and show them. Never throws: a failure is a
+  /// plain status line.
+  Future<void> _checkLocalModels() async {
+    if (_localChecking) return;
+    setState(() {
+      _localChecking = true;
+      _localStatus = 'Checking...';
+    });
+    final client = LocalModelClient();
+    try {
+      final choice = await client.detect();
+      if (!mounted) return;
+      if (choice == null) {
+        setState(() {
+          _localFound = [];
+          _localStatus =
+              'No local model is running. Start Ollama with `ollama serve`, or start the LM Studio server, then check again.';
+        });
+        return;
+      }
+      setState(() {
+        _localFound = choice.models;
+        _localKind = choice.kind;
+        if (_localModel.text.trim().isEmpty) {
+          _localModel.text = choice.model;
+        }
+        _localStatus =
+            '${choice.kind == 'lmstudio' ? 'LM Studio' : 'Ollama'} is running: ${choice.models.join(', ')}';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _localFound = [];
+        _localStatus = 'Could not check local models.';
+      });
+    } finally {
+      client.close();
+      if (mounted) setState(() => _localChecking = false);
+    }
   }
 
   @override
@@ -256,6 +312,116 @@ class _SettingsPageState extends State<SettingsPage> {
                             ],
                           ],
                         ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _card(
+                    title: 'Local model (optional)',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Optional. DJ can answer with a model on this '
+                          'laptop — no internet, no key. Start Ollama or '
+                          'the LM Studio server first.',
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('Server'),
+                        const SizedBox(height: 4),
+                        DropdownButton<String>(
+                          value: _localKind,
+                          items: const [
+                            DropdownMenuItem(
+                                value: 'ollama', child: Text('Ollama')),
+                            DropdownMenuItem(
+                                value: 'lmstudio',
+                                child: Text('LM Studio')),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _localKind = value;
+                              _localSaved = false;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('Model'),
+                        const SizedBox(height: 4),
+                        TextField(
+                          controller: _localModel,
+                          decoration: const InputDecoration(
+                            hintText: 'qwen3.5:9b (blank = auto)',
+                          ),
+                          onChanged: (_) =>
+                              setState(() => _localSaved = false),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text('Answer with the local model first'),
+                            ),
+                            Switch(
+                              value: _preferLocal,
+                              onChanged: (value) {
+                                setState(() {
+                                  _preferLocal = value;
+                                  _localSaved = false;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'When off, DJ tries the cloud first and falls '
+                          'back to the local model. When on, the local '
+                          'model answers first.',
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            OutlinedButton(
+                              onPressed:
+                                  _localChecking ? null : _checkLocalModels,
+                              child: Text(_localChecking
+                                  ? 'Checking...'
+                                  : 'Check local models'),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: () async {
+                                final model = _localModel.text.trim();
+                                await widget.app.saveConfig(
+                                  config.copyWith(
+                                    localModel: LocalModelConfig(
+                                      kind: _localKind,
+                                      model:
+                                          model.isEmpty ? null : model,
+                                    ),
+                                    preferLocal: _preferLocal,
+                                  ),
+                                );
+                                setState(() => _localSaved = true);
+                              },
+                              child: const Text('Save local model'),
+                            ),
+                            if (_localSaved) ...[
+                              const SizedBox(width: 8),
+                              const Text('Saved.'),
+                            ],
+                          ],
+                        ),
+                        if (_localStatus.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(_localStatus),
+                        ],
+                        if (_localFound.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text('Models found: ${_localFound.join(', ')}'),
+                        ],
                       ],
                     ),
                   ),

@@ -47,12 +47,16 @@ class AppConfig {
   final CloudConfig? cloud;
   final bool? startAtLogin;
   final bool? trayNoteSeen;
+  /// When true, DJ tries the local model before the cloud when
+  /// answering questions. Null = cloud first (the default).
+  final bool? preferLocal;
   const AppConfig({
     required this.folders,
     this.localModel,
     this.cloud,
     this.startAtLogin,
     this.trayNoteSeen,
+    this.preferLocal,
   });
   factory AppConfig.fromJson(Map<String, dynamic> j) => AppConfig(
         folders: (j['folders'] as List? ?? [])
@@ -67,6 +71,7 @@ class AppConfig {
             : null,
         startAtLogin: j['startAtLogin'] as bool?,
         trayNoteSeen: j['trayNoteSeen'] as bool?,
+        preferLocal: j['preferLocal'] as bool?,
       );
   Map<String, dynamic> toJson() => {
         'folders': folders.map((f) => f.toJson()).toList(),
@@ -74,6 +79,7 @@ class AppConfig {
         if (cloud != null) 'cloud': cloud!.toJson(),
         if (startAtLogin != null) 'startAtLogin': startAtLogin,
         if (trayNoteSeen != null) 'trayNoteSeen': trayNoteSeen,
+        if (preferLocal != null) 'preferLocal': preferLocal,
       };
   AppConfig copyWith({
     List<FolderEntry>? folders,
@@ -81,6 +87,7 @@ class AppConfig {
     CloudConfig? cloud,
     bool? startAtLogin,
     bool? trayNoteSeen,
+    bool? preferLocal,
   }) =>
       AppConfig(
         folders: folders ?? this.folders,
@@ -88,6 +95,7 @@ class AppConfig {
         cloud: cloud ?? this.cloud,
         startAtLogin: startAtLogin ?? this.startAtLogin,
         trayNoteSeen: trayNoteSeen ?? this.trayNoteSeen,
+        preferLocal: preferLocal ?? this.preferLocal,
       );
 }
 

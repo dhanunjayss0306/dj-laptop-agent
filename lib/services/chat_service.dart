@@ -8,6 +8,7 @@
 import '../core/brain.dart';
 import '../core/config.dart';
 import '../core/judge.dart';
+import '../core/local_model.dart';
 import '../core/models.dart';
 import '../core/worker_client.dart';
 import 'app_launcher.dart';
@@ -36,6 +37,18 @@ class ChatService {
   CloudProvider cloudProvider;
   String cloudModel;
 
+  /// The local model client (Ollama / LM Studio). Injectable for
+  /// tests; the app passes a real one. Null = local layer off.
+  LocalModelClient? local;
+
+  /// The local model the user picked in Settings (kind + model
+  /// name), or null for auto-detect. Refreshed when settings change.
+  LocalModelConfig? localModel;
+
+  /// When true, DJ tries the local model before the cloud when
+  /// answering questions. Refreshed when settings change.
+  bool preferLocal;
+
   ChatService({
     required this.indexer,
     required this.getFolders,
@@ -44,6 +57,9 @@ class ChatService {
     this.cloud,
     this.cloudProvider = CloudProvider.openai,
     this.cloudModel = 'gpt-4o',
+    this.local,
+    this.localModel,
+    this.preferLocal = false,
   }) : duplicates = duplicates ?? DuplicateService(systemOps: systemOps) {
     appLauncher = AppLauncher(systemOps);
   }
@@ -78,22 +94,17 @@ class ChatService {
 
       case 'ask': {
         // Question about your files: search (vector + keyword) for
-        // the relevant files, give their text to the cloud AI as
-        // context, and return the AI's answer with the sources.
-        // With no cloud client, FileQA returns the files plus a
-        // plain note — Core behaviour, never a made-up answer.
+        // the relevant files, give their text to an AI as context,
+        // and return the AI's answer with the sources. The answer
+        // goes Cloud first, then the local model (Ollama, then LM
+        // Studio), then Core — or Local first when the user picked
+        // that in Settings. With no AI at all, FileQA returns the
+        // files plus a plain note — Core behaviour, never a
+        // made-up answer.
         final qa = FileQA(
           search: indexer.search,
           readText: indexer.getFileText,
-          answer: cloud == null
-              ? null
-              : (messages) => cloud!
-                  .chat(
-                    provider: cloudProvider,
-                    model: cloudModel,
-                    messages: messages,
-                  )
-                  .join(),
+          answer: _answerWithFallback,
         );
         return qa.ask(action.query);
       }
@@ -238,6 +249,83 @@ class ChatService {
       return '\n\nMeaning search is unavailable right now — these are keyword matches.';
     }
     return '';
+  }
+
+  /// Answer a file question with the Cloud → Local → Core fallback.
+  ///
+  /// Cloud first, then the local model (Ollama, then LM Studio),
+  /// then Core — or Local first when [preferLocal] is true. A local
+  /// answer says which model answered, on the user's laptop. Throws
+  /// [LocalModelException] with a plain reason when no AI layer
+  /// answered; FileQA then falls back to the matching files.
+  Future<String> _answerWithFallback(List<ChatMessage> messages) async {
+    final reasons = <String>[];
+
+    Future<String?> tryCloud() async {
+      final client = cloud;
+      if (client == null) return null;
+      try {
+        final reply = await client
+            .chat(
+              provider: cloudProvider,
+              model: cloudModel,
+              messages: messages,
+            )
+            .join();
+        if (reply.trim().isEmpty) {
+          reasons.add('the cloud gave an empty answer');
+          return null;
+        }
+        return reply;
+      } on CloudKeyExpired {
+        reasons.add('the cloud key expired');
+        return null;
+      } catch (_) {
+        reasons.add('the cloud did not answer');
+        return null;
+      }
+    }
+
+    Future<String?> tryLocal() async {
+      final client = local;
+      if (client == null) return null;
+      LocalModelChoice? choice;
+      try {
+        choice = await client.detect(
+          preferredKind: localModel?.kind,
+          preferredModel: localModel?.model,
+        );
+      } catch (_) {
+        choice = null;
+      }
+      if (choice == null) {
+        reasons.add(
+            'no local model is running — start Ollama with `ollama serve`, or start the LM Studio server');
+        return null;
+      }
+      try {
+        final reply = await client.chat(choice: choice, messages: messages);
+        return '$reply\n\n— answered by ${choice.model} on your laptop (local model)';
+      } on LocalModelException catch (e) {
+        reasons.add(e.message);
+        return null;
+      } catch (_) {
+        reasons.add('the local model did not answer');
+        return null;
+      }
+    }
+
+    final String? first =
+        preferLocal ? await tryLocal() : await tryCloud();
+    if (first != null) return first;
+    final String? second =
+        preferLocal ? await tryCloud() : await tryLocal();
+    if (second != null) return second;
+    if (reasons.isEmpty) {
+      throw LocalModelException(
+          'No AI answered. Set the Worker URL in Settings for the cloud, or start a local model (Ollama or LM Studio).');
+    }
+    throw LocalModelException('No AI answered. ${reasons.join('; ')}.');
   }
 
   /// Plan an organize for a range (used by chat and by the UI).

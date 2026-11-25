@@ -13,6 +13,7 @@
 // never a made-up answer. When the AI call itself fails, DJ falls
 // back to the files the same way.
 
+import '../core/local_model.dart';
 import '../core/models.dart';
 import '../core/worker_client.dart';
 
@@ -56,8 +57,9 @@ class FileQA {
     if (answer == null) {
       return ChatResponseSearch(
         text: "I found ${results.length} file(s) about '$q'. "
-            'Answering in words needs the cloud AI — set the Worker URL '
-            'in Settings first. Here is what I found:',
+            'Answering in words needs an AI — set the Worker URL in '
+            'Settings for the cloud, or start a local model (Ollama '
+            'or LM Studio). Here is what I found:',
         results: results,
       );
     }
@@ -81,13 +83,19 @@ class FileQA {
     try {
       final reply = (await answer!(messages)).trim();
       return ChatResponseSearch(
-        text: reply.isEmpty ? 'The cloud AI gave an empty answer.' : reply,
+        text: reply.isEmpty ? 'The AI gave an empty answer.' : reply,
         results: results,
       );
-    } catch (_) {
+    } catch (e) {
+      // A plain reason from the local layer (for example "no local
+      // model is running") is shown as-is; any other failure gets
+      // the generic line. Either way DJ falls back to the files —
+      // never a made-up answer.
+      final note = e is LocalModelException
+          ? e.message
+          : 'The AI did not answer.';
       return ChatResponseSearch(
-        text: 'The cloud AI did not answer. Here are the files I found '
-            "about '$q':",
+        text: '$note Here are the files I found about \'$q\':',
         results: results,
       );
     }
