@@ -208,15 +208,7 @@ class _HomeShellState extends State<HomeShell> {
               ),
               body: Column(
                 children: [
-                  _DynamicIslandPill(
-                    app: app,
-                    onAsk: () {
-                      if (_screenQaRunning) return;
-                      _screenQaRunning = true;
-                      runScreenQaFlow(context, app)
-                          .whenComplete(() => _screenQaRunning = false);
-                    },
-                  ),
+                  _DynamicIslandPill(app: app),
                   _Banners(app: app),
                   Expanded(
                     child: wide
@@ -563,17 +555,16 @@ class _Footer extends StatelessWidget {
 /// idle and expands with live streaming captions ("fake lyrics") while
 /// listening, thinking, or speaking.
 class _DynamicIslandPill extends StatelessWidget {
-  const _DynamicIslandPill({required this.app, required this.onAsk});
+  const _DynamicIslandPill({required this.app});
 
   final DjAppState app;
-  final VoidCallback onAsk;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<({String state, String text})>(
       valueListenable: app.companionState,
       builder: (context, companion, _) {
-        final active = companion.state != 'idle';
+        if (companion.state == 'idle') return const SizedBox.shrink();
         final dotColor = switch (companion.state) {
           'listening' => const Color(0xFF22C55E),
           'thinking' => const Color(0xFFA78BFA),
@@ -585,72 +576,63 @@ class _DynamicIslandPill extends StatelessWidget {
             : switch (companion.state) {
                 'listening' => 'Listening...',
                 'thinking' => 'Thinking...',
-                'responding' => 'DJ',
-                _ => 'Ask DJ about your screen',
+                _ => 'DJ',
               };
         return Padding(
           padding: const EdgeInsets.only(top: 4, bottom: 6),
           child: Center(
-            child: InkWell(
-              onTap: active ? null : onAsk,
-              borderRadius: BorderRadius.circular(24),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                constraints: BoxConstraints(
-                  maxWidth: active ? 460 : 220,
-                  minWidth: active ? 240 : 180,
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF111114),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: active ? dotColor : const Color(0xFF2A2A32),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              constraints: const BoxConstraints(
+                maxWidth: 460,
+                minWidth: 240,
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111114),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: dotColor),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        label,
-                        maxLines: active ? 3 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      app.voiceChannel.stopSpeak();
+                      app.cursorChannel.hideCursor();
+                      app.updateCompanion('idle');
+                    },
+                    child: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: Color(0xFFB0B0B8),
                     ),
-                    if (active) ...[
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () {
-                          app.voiceChannel.stopSpeak();
-                          app.cursorChannel.hideCursor();
-                          app.updateCompanion('idle');
-                        },
-                        child: const Icon(
-                          Icons.close,
-                          size: 16,
-                          color: Color(0xFFB0B0B8),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

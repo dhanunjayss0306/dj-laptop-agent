@@ -11,6 +11,7 @@ import 'duplicates_page.dart';
 import 'file_row.dart';
 import 'folders_dialog.dart';
 import 'organize_page.dart';
+import 'screen_qa_flow.dart';
 
 const String welcomeMessage =
     'Hi, I\'m DJ. I find your files on this laptop - by name or by what '
@@ -251,6 +252,12 @@ class _CommandPageState extends State<CommandPage> {
                 ),
                 const SizedBox(width: 4),
               ],
+              IconButton(
+                tooltip: 'Ask DJ about your screen',
+                icon: const Icon(Icons.auto_awesome, size: 20),
+                onPressed: _busy ? null : () => runScreenQaFlow(context, widget.app),
+              ),
+              const SizedBox(width: 4),
               ElevatedButton(
                 onPressed: (_busy || _composer.text.trim().isEmpty)
                     ? null
