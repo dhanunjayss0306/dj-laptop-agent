@@ -26,6 +26,7 @@ Future<String?> _askQuestion(BuildContext context, DjAppState app) async {
         Future<void> toggleMic() async {
           if (listening) {
             await app.voiceChannel.stopListening();
+            if (!dialogContext.mounted) return;
             setDialogState(() => listening = false);
             return;
           }
@@ -36,8 +37,9 @@ Future<String?> _askQuestion(BuildContext context, DjAppState app) async {
             }
           });
           finalSub ??= app.voiceChannel.onFinalResult.listen((t) {
+            if (!dialogContext.mounted) return;
             setDialogState(() => listening = false);
-            if (t.trim().isNotEmpty && dialogContext.mounted) {
+            if (t.trim().isNotEmpty) {
               Navigator.of(dialogContext).pop(t.trim());
             }
           });

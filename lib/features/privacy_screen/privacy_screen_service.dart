@@ -142,7 +142,7 @@ class PrivacyScreenService {
 
     final List<CameraDevice> devices = await _nativeCamera.listDevices();
     if (devices.isEmpty) {
-      await _disposeDetector();
+      _disposeDetector();
       onError?.call('No camera found on this device.');
       return;
     }
@@ -160,7 +160,7 @@ class PrivacyScreenService {
           .toList(),
     );
     if (choice == null) {
-      await _disposeDetector();
+      _disposeDetector();
       onError?.call('No camera found on this device.');
       return;
     }
@@ -181,7 +181,7 @@ class PrivacyScreenService {
       deviceId: _cameraDeviceId,
       preferredName: _cameraName,
     )) {
-      await _disposeDetector();
+      _disposeDetector();
       onError?.call(
         'Could not open the camera.\n\n'
         'This usually means another app is already using it — close '
@@ -194,9 +194,9 @@ class PrivacyScreenService {
     _scheduleNextCapture(Duration.zero);
   }
 
-  Future<void> _disposeDetector() async {
+  void _disposeDetector() {
     try {
-      await _tfliteDetector?.dispose();
+      _tfliteDetector?.dispose();
     } catch (_) {}
     _tfliteDetector = null;
   }
