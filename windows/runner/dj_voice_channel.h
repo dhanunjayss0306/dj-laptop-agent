@@ -62,6 +62,7 @@ class DjVoiceChannel {
   // Finds whisper-server.exe: <exe dir>\whisper-server.exe, then
   // <exe dir>\whisper\whisper-server.exe. Empty when not found.
   std::string FindWhisperServer() const;
+  std::string FindWhisperModel() const;
   bool IsWhisperRunning() const;
   // One persistent SAPI voice for the life of the channel: speak() and
   // stopSpeak() must share it, because a new ISpVoice cannot stop

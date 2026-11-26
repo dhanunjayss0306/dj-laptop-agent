@@ -63,10 +63,11 @@ bool DjHotkeyChannel::HandleMessage(HWND hwnd, UINT message, WPARAM wparam,
     return false;
   }
   const int id = static_cast<int>(wparam);
-  if (id == kHotkeyId && registered_) {
+  if ((id == kHotkeyId && registered_) ||
+      (id == kVoiceHotkeyId && voice_registered_)) {
     // Fire-and-forget, mirroring DjSystemChannel::NotifyTrayHidden: Dart
     // owns the Stream (HotkeyChannel.onHotkeyPressed) and decides what the
-    // press does (default: show/focus the DJ window).
+    // press does.
     channel_.InvokeMethod(
         "onHotkeyPressed",
         std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(
@@ -89,7 +90,11 @@ void DjHotkeyChannel::Unregister() {
   if (registered_ && hwnd_ != nullptr) {
     ::UnregisterHotKey(hwnd_, kHotkeyId);
   }
+  if (voice_registered_ && hwnd_ != nullptr) {
+    ::UnregisterHotKey(hwnd_, kVoiceHotkeyId);
+  }
   registered_ = false;
+  voice_registered_ = false;
 }
 
 void DjHotkeyChannel::UnregisterPrivacy() {
@@ -152,6 +157,13 @@ void DjHotkeyChannel::HandleMethodCall(
           Err("registerHotkey needs a 'modifiers' list of strings and "
               "an integer 'vk' virtual-key code."));
       return;
+    }
+    if (!voice_registered_ && hwnd_ != nullptr) {
+      if (::RegisterHotKey(hwnd_, kVoiceHotkeyId,
+                           MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                           VK_SPACE) != FALSE) {
+        voice_registered_ = true;
+      }
     }
     // One main hotkey at a time: a new registration replaces the old one.
     register_one(kHotkeyId, &registered_, modifiers, vk, std::move(result));

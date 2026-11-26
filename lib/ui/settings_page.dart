@@ -246,6 +246,22 @@ class _SettingsPageState extends State<SettingsPage> {
                             'tray icon to open or quit.',
                           ),
                         ],
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text('Speak screen answers aloud'),
+                            ),
+                            Switch(
+                              value: config.speakScreenAnswers ?? false,
+                              onChanged: (value) async {
+                                await widget.app.saveConfig(
+                                  config.copyWith(speakScreenAnswers: value),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

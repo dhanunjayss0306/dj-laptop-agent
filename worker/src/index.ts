@@ -524,56 +524,59 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   }
 
   // Try Groq Whisper first (fastest free tier), then OpenAI Whisper, then Gemini multimodal.
+  // Fall through if an earlier provider fails and another key is configured.
+  let lastStatus = 503;
+  let lastMessage = 'no speech transcription key configured in worker';
+
   if (env.GROQ_API_KEY) {
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'audio/wav' }), 'speech.wav');
     form.append('model', 'whisper-large-v3-turbo');
-    let upstream: Response;
     try {
-      upstream = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      const upstream = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
         headers: { authorization: `Bearer ${env.GROQ_API_KEY}` },
         body: form,
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
+      if (upstream.ok) {
+        const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
+        return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
+      }
+      lastStatus = isAuthError(upstream.status) ? upstream.status : 502;
+      lastMessage = isAuthError(upstream.status) ? 'cloud key expired' : `transcription provider error (${upstream.status})`;
     } catch {
-      return errorJson('transcription provider unreachable', 502);
+      lastStatus = 502;
+      lastMessage = 'transcription provider unreachable';
     }
-    if (!upstream.ok) {
-      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
-      return errorJson(`transcription provider error (${upstream.status})`, 502);
-    }
-    const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
-    return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
   }
 
   if (env.OPENAI_API_KEY) {
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: 'audio/wav' }), 'speech.wav');
     form.append('model', 'whisper-1');
-    let upstream: Response;
     try {
-      upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: { authorization: `Bearer ${env.OPENAI_API_KEY}` },
         body: form,
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
+      if (upstream.ok) {
+        const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
+        return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
+      }
+      lastStatus = isAuthError(upstream.status) ? upstream.status : 502;
+      lastMessage = isAuthError(upstream.status) ? 'cloud key expired' : `transcription provider error (${upstream.status})`;
     } catch {
-      return errorJson('transcription provider unreachable', 502);
+      lastStatus = 502;
+      lastMessage = 'transcription provider unreachable';
     }
-    if (!upstream.ok) {
-      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
-      return errorJson(`transcription provider error (${upstream.status})`, 502);
-    }
-    const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
-    return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
   }
 
   if (env.GEMINI_API_KEY) {
-    let upstream: Response;
     try {
-      upstream = await fetch(
+      const upstream = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
         {
           method: 'POST',
@@ -591,21 +594,22 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
           signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         },
       );
+      if (upstream.ok) {
+        const data = (await upstream.json().catch(() => null)) as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+        } | null;
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        return json({ ok: true, text: typeof text === 'string' ? text.trim() : '' });
+      }
+      lastStatus = isAuthError(upstream.status) ? upstream.status : 502;
+      lastMessage = isAuthError(upstream.status) ? 'cloud key expired' : `transcription provider error (${upstream.status})`;
     } catch {
-      return errorJson('transcription provider unreachable', 502);
+      lastStatus = 502;
+      lastMessage = 'transcription provider unreachable';
     }
-    if (!upstream.ok) {
-      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
-      return errorJson(`transcription provider error (${upstream.status})`, 502);
-    }
-    const data = (await upstream.json().catch(() => null)) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
-    } | null;
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return json({ ok: true, text: typeof text === 'string' ? text.trim() : '' });
   }
 
-  return errorJson('no speech transcription key configured in worker', 503);
+  return errorJson(lastMessage, lastStatus);
 }
 
 async function handleTranscribeToken(env: Env): Promise<Response> {

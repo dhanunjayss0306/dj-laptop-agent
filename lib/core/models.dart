@@ -57,6 +57,8 @@ class AppConfig {
   final bool? privacyDetectShoulderSurfers;
   /// Privacy Screen: start protection when DJ starts. Null = false.
   final bool? privacyStartOnLaunch;
+  /// Speak screen answers aloud via TTS. Null = false (text-only captions).
+  final bool? speakScreenAnswers;
   const AppConfig({
     required this.folders,
     this.localModel,
@@ -67,6 +69,7 @@ class AppConfig {
     this.privacySensitivity,
     this.privacyDetectShoulderSurfers,
     this.privacyStartOnLaunch,
+    this.speakScreenAnswers,
   });
   factory AppConfig.fromJson(Map<String, dynamic> j) => AppConfig(
         folders: (j['folders'] as List? ?? [])
@@ -88,6 +91,7 @@ class AppConfig {
         privacyDetectShoulderSurfers:
             j['privacyDetectShoulderSurfers'] as bool?,
         privacyStartOnLaunch: j['privacyStartOnLaunch'] as bool?,
+        speakScreenAnswers: j['speakScreenAnswers'] as bool?,
       );
   Map<String, dynamic> toJson() => {
         'folders': folders.map((f) => f.toJson()).toList(),
@@ -102,6 +106,8 @@ class AppConfig {
           'privacyDetectShoulderSurfers': privacyDetectShoulderSurfers,
         if (privacyStartOnLaunch != null)
           'privacyStartOnLaunch': privacyStartOnLaunch,
+        if (speakScreenAnswers != null)
+          'speakScreenAnswers': speakScreenAnswers,
       };
   AppConfig copyWith({
     List<FolderEntry>? folders,
@@ -113,6 +119,7 @@ class AppConfig {
     double? privacySensitivity,
     bool? privacyDetectShoulderSurfers,
     bool? privacyStartOnLaunch,
+    bool? speakScreenAnswers,
   }) =>
       AppConfig(
         folders: folders ?? this.folders,
@@ -126,6 +133,7 @@ class AppConfig {
             privacyDetectShoulderSurfers ?? this.privacyDetectShoulderSurfers,
         privacyStartOnLaunch:
             privacyStartOnLaunch ?? this.privacyStartOnLaunch,
+        speakScreenAnswers: speakScreenAnswers ?? this.speakScreenAnswers,
       );
 }
 

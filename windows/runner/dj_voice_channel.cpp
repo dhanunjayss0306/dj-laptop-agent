@@ -237,6 +237,88 @@ bool ReadWholeFile(const std::string& path, std::vector<uint8_t>* out) {
   return true;
 }
 
+bool PostWavToWhisperServer(const std::vector<uint8_t>& audio,
+                            const std::string& filename,
+                            std::string* out_text,
+                            std::string* out_err) {
+  const std::string boundary = "----dj-whisper-boundary";
+  std::string body;
+  body += "--" + boundary + "\r\n";
+  body += "Content-Disposition: form-data; name=\"file\"; filename=\"" +
+          filename + "\"\r\n";
+  body += "Content-Type: application/octet-stream\r\n\r\n";
+  const size_t header_len = body.size();
+  body.resize(header_len + audio.size());
+  if (!audio.empty()) {
+    std::memcpy(&body[header_len], audio.data(), audio.size());
+  }
+  body += "\r\n--" + boundary + "--\r\n";
+
+  HINTERNET session = ::WinHttpOpen(
+      L"DJ whisper client", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+      WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (session == nullptr) {
+    *out_err = "Could not open an HTTP session (" + LastErrorMessage() + ").";
+    return false;
+  }
+  HINTERNET connection =
+      ::WinHttpConnect(session, kWhisperHost, kWhisperPort, 0);
+  if (connection == nullptr) {
+    ::WinHttpCloseHandle(session);
+    *out_err = "Could not connect to whisper-server at 127.0.0.1:8080 (" +
+               LastErrorMessage() + ").";
+    return false;
+  }
+  HINTERNET request = ::WinHttpOpenRequest(
+      connection, L"POST", L"/inference", nullptr, WINHTTP_NO_REFERER,
+      WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+  if (request == nullptr) {
+    ::WinHttpCloseHandle(connection);
+    ::WinHttpCloseHandle(session);
+    *out_err = "Could not open the inference request (" + LastErrorMessage() +
+               ").";
+    return false;
+  }
+  const std::wstring content_type = WideFromUtf8(
+      "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n");
+  const BOOL sent = ::WinHttpSendRequest(
+      request, content_type.c_str(), static_cast<DWORD>(content_type.size()),
+      const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
+      static_cast<DWORD>(body.size()), 0);
+  if (!sent || !::WinHttpReceiveResponse(request, nullptr)) {
+    ::WinHttpCloseHandle(request);
+    ::WinHttpCloseHandle(connection);
+    ::WinHttpCloseHandle(session);
+    *out_err = "whisper-server did not answer the transcription request (" +
+               LastErrorMessage() + ").";
+    return false;
+  }
+  std::string response;
+  DWORD available = 0;
+  DWORD read = 0;
+  char chunk[4096];
+  while (::WinHttpQueryDataAvailable(request, &available) && available > 0) {
+    while (available > 0) {
+      const DWORD to_read =
+          available < sizeof(chunk) ? available
+                                    : static_cast<DWORD>(sizeof(chunk));
+      if (!::WinHttpReadData(request, chunk, to_read, &read) || read == 0) {
+        break;
+      }
+      response.append(chunk, read);
+      available -= read;
+    }
+  }
+  ::WinHttpCloseHandle(request);
+  ::WinHttpCloseHandle(connection);
+  ::WinHttpCloseHandle(session);
+  if (!ExtractJsonTextField(response, out_text)) {
+    *out_err = "whisper-server replied, but the reply had no transcript text.";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 DjVoiceChannel::DjVoiceChannel(flutter::BinaryMessenger* messenger)
@@ -370,6 +452,25 @@ std::string DjVoiceChannel::FindWhisperServer() const {
   const std::string subdir = dir + "\\whisper\\whisper-server.exe";
   if (PathExistsUtf8(subdir)) {
     return subdir;
+  }
+  return std::string();
+}
+
+std::string DjVoiceChannel::FindWhisperModel() const {
+  const std::string dir = ExeDirectoryUtf8();
+  if (dir.empty()) {
+    return std::string();
+  }
+  const std::string dirs[2] = {dir, dir + "\\whisper"};
+  for (const std::string& folder : dirs) {
+    WIN32_FIND_DATAW fd{};
+    const std::wstring pattern = WideFromUtf8(folder + "\\*.bin");
+    HANDLE h = ::FindFirstFileW(pattern.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+      const std::string found = folder + "\\" + Utf8FromWide(fd.cFileName);
+      ::FindClose(h);
+      return found;
+    }
   }
   return std::string();
 }
@@ -574,14 +675,18 @@ void DjVoiceChannel::HandleMethodCall(
     std::string model_path;
     GetStringArg(call, "modelPath", &model_path);  // Optional.
     const std::string server = FindWhisperServer();
+    const std::string default_model = FindWhisperModel();
     flutter::EncodableMap out;
     out[flutter::EncodableValue("ok")] = flutter::EncodableValue(true);
     out[flutter::EncodableValue("serverFound")] =
         flutter::EncodableValue(!server.empty());
     out[flutter::EncodableValue("serverPath")] =
         flutter::EncodableValue(server);
+    out[flutter::EncodableValue("defaultModelPath")] =
+        flutter::EncodableValue(default_model);
     out[flutter::EncodableValue("modelFound")] = flutter::EncodableValue(
-        !model_path.empty() && PathExistsUtf8(model_path));
+        (!model_path.empty() && PathExistsUtf8(model_path)) ||
+        !default_model.empty());
     out[flutter::EncodableValue("running")] =
         flutter::EncodableValue(IsWhisperRunning());
     result->Success(flutter::EncodableValue(std::move(out)));
@@ -660,92 +765,45 @@ void DjVoiceChannel::HandleMethodCall(
           Err("Could not read the audio file: " + audio_path + "."));
       return;
     }
-    // POST multipart/form-data to /inference. Field name "file", filename
-    // from the audio path's basename.
-    const std::string boundary = "----dj-whisper-boundary";
     std::string filename = audio_path;
     const size_t slash = filename.find_last_of("\\/");
     if (slash != std::string::npos) {
       filename = filename.substr(slash + 1);
     }
-    std::string body;
-    body += "--" + boundary + "\r\n";
-    body += "Content-Disposition: form-data; name=\"file\"; filename=\"" +
-            filename + "\"\r\n";
-    body += "Content-Type: application/octet-stream\r\n\r\n";
-    const size_t header_len = body.size();
-    body.resize(header_len + audio.size());
-    if (!audio.empty()) {
-      std::memcpy(&body[header_len], audio.data(), audio.size());
-    }
-    body += "\r\n--" + boundary + "--\r\n";
-
-    HINTERNET session = ::WinHttpOpen(
-        L"DJ whisper client", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (session == nullptr) {
-      result->Success(
-          Err("Could not open an HTTP session (" + LastErrorMessage() + ")."));
-      return;
-    }
-    HINTERNET connection = ::WinHttpConnect(session, kWhisperHost,
-                                            kWhisperPort, 0);
-    if (connection == nullptr) {
-      ::WinHttpCloseHandle(session);
-      result->Success(Err("Could not connect to whisper-server at "
-                          "127.0.0.1:8080 (" +
-                          LastErrorMessage() + ")."));
-      return;
-    }
-    HINTERNET request = ::WinHttpOpenRequest(
-        connection, L"POST", L"/inference", nullptr, WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-    if (request == nullptr) {
-      ::WinHttpCloseHandle(connection);
-      ::WinHttpCloseHandle(session);
-      result->Success(Err("Could not open the inference request (" +
-                          LastErrorMessage() + ")."));
-      return;
-    }
-    const std::wstring content_type = WideFromUtf8(
-        "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n");
-    const BOOL sent = ::WinHttpSendRequest(
-        request, content_type.c_str(), static_cast<DWORD>(content_type.size()),
-        const_cast<char*>(body.data()), static_cast<DWORD>(body.size()),
-        static_cast<DWORD>(body.size()), 0);
-    if (!sent || !::WinHttpReceiveResponse(request, nullptr)) {
-      ::WinHttpCloseHandle(request);
-      ::WinHttpCloseHandle(connection);
-      ::WinHttpCloseHandle(session);
-      result->Success(Err("whisper-server did not answer the transcription "
-                          "request (" +
-                          LastErrorMessage() + ")."));
-      return;
-    }
-    std::string response;
-    DWORD available = 0;
-    DWORD read = 0;
-    char chunk[4096];
-    while (::WinHttpQueryDataAvailable(request, &available) && available > 0) {
-      while (available > 0) {
-        const DWORD to_read =
-            available < sizeof(chunk)
-                ? available
-                : static_cast<DWORD>(sizeof(chunk));
-        if (!::WinHttpReadData(request, chunk, to_read, &read) || read == 0) {
-          break;
-        }
-        response.append(chunk, read);
-        available -= read;
-      }
-    }
-    ::WinHttpCloseHandle(request);
-    ::WinHttpCloseHandle(connection);
-    ::WinHttpCloseHandle(session);
     std::string text;
-    if (!ExtractJsonTextField(response, &text)) {
-      result->Success(Err("whisper-server replied, but the reply had no "
-                          "transcript text."));
+    std::string err;
+    if (!PostWavToWhisperServer(audio, filename, &text, &err)) {
+      result->Success(Err(err));
+      return;
+    }
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("ok")] = flutter::EncodableValue(true);
+    out[flutter::EncodableValue("text")] = flutter::EncodableValue(text);
+    result->Success(flutter::EncodableValue(std::move(out)));
+    return;
+  }
+
+  if (method == "transcribeBytes") {
+    std::string b64;
+    if (!GetStringArg(call, "wavBase64", &b64) || b64.empty()) {
+      result->Success(Err("transcribeBytes needs 'wavBase64'."));
+      return;
+    }
+    if (!IsWhisperRunning()) {
+      result->Success(
+          Err(std::string("whisper-server is not running. ") +
+              kWhisperMissingMessage));
+      return;
+    }
+    std::vector<uint8_t> audio = Base64DecodeBytes(b64);
+    if (audio.size() < 44) {
+      result->Success(Err("transcribeBytes received malformed WAV bytes."));
+      return;
+    }
+    std::string text;
+    std::string err;
+    if (!PostWavToWhisperServer(audio, "speech.wav", &text, &err)) {
+      result->Success(Err(err));
       return;
     }
     flutter::EncodableMap out;

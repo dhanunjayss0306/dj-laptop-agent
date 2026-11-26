@@ -58,10 +58,12 @@ Future<({bool cancelled, String? transcript})> _listenVoiceQuestion(
   DjAppState app,
   WorkerClient? client,
 ) async {
-  // Windows needs a transcription backend (Worker or running Whisper).
-  if (Platform.isWindows && client == null) {
-    final status = await app.voiceChannel.whisperStatus();
-    if (status['running'] != true) {
+  Map<String, dynamic>? whisper;
+  if (Platform.isWindows) {
+    whisper = await app.voiceChannel.whisperStatus();
+    if (client == null &&
+        whisper['running'] != true &&
+        whisper['serverFound'] != true) {
       return (cancelled: false, transcript: null);
     }
   }
@@ -71,7 +73,12 @@ Future<({bool cancelled, String? transcript})> _listenVoiceQuestion(
     return (cancelled: false, transcript: null);
   }
 
-  await app.updateCompanion('listening', 'Listening...');
+  await app.updateCompanion(
+    'listening',
+    Platform.isWindows
+        ? 'Listening... (speak, pause or press Ctrl+Shift+Space)'
+        : 'Listening...',
+  );
 
   final done = Completer<String>();
   var androidFinal = '';
@@ -143,12 +150,25 @@ Future<({bool cancelled, String? transcript})> _listenVoiceQuestion(
     try {
       final wavBytes = base64Decode(wavB64);
       final text = await client.transcribeWav(wavBytes);
-      return (
-        cancelled: false,
-        transcript: text.trim().isEmpty ? null : text.trim(),
-      );
+      if (text.trim().isNotEmpty) {
+        return (cancelled: false, transcript: text.trim());
+      }
     } catch (_) {
-      return (cancelled: false, transcript: null);
+      // Fall through to local OpenWhisper sidecar if available.
+    }
+  }
+  if (Platform.isWindows) {
+    whisper ??= await app.voiceChannel.whisperStatus();
+    if (whisper['running'] != true && whisper['serverFound'] == true) {
+      final modelPath = whisper['defaultModelPath'] as String? ?? '';
+      if (modelPath.isNotEmpty) {
+        await app.voiceChannel.startWhisper(modelPath);
+      }
+    }
+    final local = await app.voiceChannel.transcribeWavBytes(wavB64);
+    if (local['ok'] == true) {
+      final text = (local['text'] as String? ?? '').trim();
+      return (cancelled: false, transcript: text.isEmpty ? null : text);
     }
   }
   return (cancelled: false, transcript: null);
@@ -202,12 +222,13 @@ Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
         }
       }
 
+      final speakAloud = app.config.value.speakScreenAnswers ?? false;
       await app.updateCompanion('responding', answer.text);
-      if (answer.text.isNotEmpty) {
+      if (speakAloud && answer.text.isNotEmpty) {
         await app.speakReply(answer.text, client: client);
       }
 
-      await Future<void>.delayed(const Duration(seconds: 6));
+      await Future<void>.delayed(Duration(seconds: speakAloud ? 6 : 10));
       if (!cancelled) {
         await app.updateCompanion('idle');
         await app.cursorChannel.clearAnnotations();

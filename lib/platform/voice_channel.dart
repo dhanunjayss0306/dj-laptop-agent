@@ -135,6 +135,13 @@ class VoiceChannel {
     return _invoke('transcribe', <String, dynamic>{'audioPath': audioPath});
   }
 
+  /// Transcribes in-memory WAV bytes (`wavBase64`) through local whisper-server.
+  Future<Map<String, dynamic>> transcribeWavBytes(String wavBase64) {
+    return _invoke('transcribeBytes', <String, dynamic>{
+      'wavBase64': wavBase64,
+    });
+  }
+
   /// Reports whether the whisper sidecar binary and the model at
   /// [modelPath] exist, and whether the server process is running.
   /// Never throws.

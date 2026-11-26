@@ -70,11 +70,14 @@ class DjHotkeyChannel {
   HWND hwnd_ = nullptr;
   bool registered_ = false;
   bool privacy_registered_ = false;
+  bool voice_registered_ = false;
   // Main hotkey id (Ctrl+Alt+D). Only one main hotkey is held at a time.
   static constexpr int kHotkeyId = 1;
   // Privacy Screen override hotkey id (Ctrl+Alt+P). A separate id so the
   // two hotkeys coexist; registering one never replaces the other.
   static constexpr int kPrivacyHotkeyId = 2;
+  // Secondary quick voice shortcut (Ctrl+Shift+Space).
+  static constexpr int kVoiceHotkeyId = 3;
 };
 
 }  // namespace dj
