@@ -260,7 +260,7 @@ class ScreenQA {
     }
   }
 
-  /// Streaming ScreenQA: streams tokens live into [onCaption] ("fake lyrics")
+  /// Streaming ScreenQA: streams tokens live via [onCompanionUpdate] ("fake lyrics")
   /// and flies the fake cursor sequentially through every `[POINT:...]` tag.
   Future<ScreenAnswer> askStreaming(
     String question, {

@@ -111,6 +111,7 @@ class _CommandPageState extends State<CommandPage> {
     if (res['ok'] != true) {
       setState(() => _listening = false);
       await widget.app.updateCompanion('idle');
+      if (!mounted) return;
       final msg =
           (res['error'] ?? res['message'] ?? 'Voice unavailable').toString();
       ScaffoldMessenger.of(context).showSnackBar(
