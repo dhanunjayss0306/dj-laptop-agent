@@ -4,7 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Bundle
+import android.util.Base64
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -61,6 +65,7 @@ class VoiceChannelHandler(
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var pendingSpeak: String? = null
+    private var activeTrack: AudioTrack? = null
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
@@ -80,8 +85,18 @@ class VoiceChannelHandler(
                         result.success(mapOf("ok" to true, "message" to "speaking"))
                     }
                 }
+                "playAudio" -> {
+                    val b64 = call.argument<String>("wavBase64") ?: ""
+                    if (b64.isEmpty()) {
+                        result.success(mapOf("ok" to false, "message" to "empty audio"))
+                    } else {
+                        playWavBase64(b64)
+                        result.success(mapOf("ok" to true, "message" to "playing"))
+                    }
+                }
                 "stopSpeaking", "stopSpeak" -> {
                     tts?.stop()
+                    stopActiveTrack()
                     result.success(mapOf("ok" to true, "message" to "stopped speaking"))
                 }
                 // Whisper sidecar methods exist on the Windows voice channel
@@ -142,7 +157,10 @@ class VoiceChannelHandler(
             }
 
             override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onRmsChanged(rmsdB: Float) {
+                val norm = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f).toDouble()
+                sendEvent("onAudioLevel", mapOf("level" to norm))
+            }
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() {
                 listening = false
@@ -261,8 +279,51 @@ class VoiceChannelHandler(
         )
     }
 
+    private fun stopActiveTrack() {
+        val track = activeTrack
+        activeTrack = null
+        if (track != null) {
+            try {
+                track.pause()
+                track.flush()
+                track.stop()
+            } catch (_: Exception) {}
+            try {
+                track.release()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun playWavBase64(b64: String) {
+        stopActiveTrack()
+        val raw = Base64.decode(b64, Base64.DEFAULT)
+        if (raw.size <= 44) return
+        val pcm = raw.copyOfRange(44, raw.size)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(16000)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(pcm.size)
+            .build()
+        activeTrack = track
+        track.write(pcm, 0, pcm.size)
+        track.play()
+    }
+
     /** Called from MainActivity.onDestroy(). Releases the recognizer and TTS. */
     fun release() {
+        stopActiveTrack()
         try {
             recognizer?.cancel()
         } catch (_: Exception) {

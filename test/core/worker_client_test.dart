@@ -354,5 +354,25 @@ void main() {
       );
       expect(body.toLowerCase(), isNot(contains('apikey')));
     });
+
+    test('transcribeWav posts base64 wav to /transcribe and returns text',
+        () async {
+      final fake = FakeHttpClient(
+        200,
+        '{"ok":true,"text":"open downloads"}',
+      );
+      final client = WorkerClient(
+        'https://dj-proxy.test.workers.dev',
+        httpClient: fake,
+      );
+
+      final text = await client.transcribeWav(List<int>.filled(48, 0));
+      expect(text, 'open downloads');
+      expect(fake.lastMethod, 'POST');
+      expect(fake.lastUri.toString(), 'https://dj-proxy.test.workers.dev/transcribe');
+      final decoded =
+          jsonDecode(fake.lastRequest!.bodyBuffer.toString()) as Map<String, dynamic>;
+      expect(decoded['wavBase64'], isA<String>());
+    });
   });
 }

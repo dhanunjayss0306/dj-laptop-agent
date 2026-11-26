@@ -202,6 +202,9 @@ class DjAppState {
     (state: 'idle', text: ''),
   );
 
+  /// Whether Windows Clicky-style floating cursor follows the mouse when idle.
+  final ValueNotifier<bool> companionFollow = ValueNotifier<bool>(false);
+
   /// Rolling ScreenQA turns (last 10 messages) so follow-ups have context.
   final List<ChatMessage> screenQaHistory = <ChatMessage>[];
 
@@ -214,6 +217,61 @@ class DjAppState {
       cursorChannel.setCompanionState(nativeState, text),
       floatingButtonChannel.setIslandState(state, text),
     ]);
+  }
+
+  /// Toggle floating cursor companion follow mode on Windows.
+  Future<void> setCompanionFollow(bool follow) async {
+    companionFollow.value = follow;
+    await cursorChannel.setCompanionFollow(follow);
+  }
+
+  /// Speak [text] using Worker ElevenLabs TTS (`pcm_16000` played in-memory),
+  /// falling back seamlessly to offline Windows SAPI / Android TTS.
+  Future<void> speakReply(String text, {WorkerClient? client}) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    if (client != null) {
+      try {
+        final pcm = <int>[];
+        await for (final chunk
+            in client.tts(text: trimmed, format: 'pcm_16000')) {
+          pcm.addAll(chunk);
+        }
+        if (pcm.isNotEmpty) {
+          final wav = _wrapPcm16kWav(pcm);
+          final res = await voiceChannel.playAudioBase64(base64Encode(wav));
+          if (res['ok'] == true) return;
+        }
+      } catch (_) {
+        // Fall back to offline OS TTS when ElevenLabs isn't configured.
+      }
+    }
+    await voiceChannel.speak(trimmed);
+  }
+
+  static List<int> _wrapPcm16kWav(List<int> pcm) {
+    final len = pcm.length;
+    final total = 36 + len;
+    void put32(List<int> b, int v) {
+      b.addAll([v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff]);
+    }
+    void put16(List<int> b, int v) {
+      b.addAll([v & 0xff, (v >> 8) & 0xff]);
+    }
+    final out = <int>[0x52, 0x49, 0x46, 0x46]; // RIFF
+    put32(out, total);
+    out.addAll([0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20]); // WAVEfmt_
+    put32(out, 16);
+    put16(out, 1);
+    put16(out, 1);
+    put32(out, 16000);
+    put32(out, 32000);
+    put16(out, 2);
+    put16(out, 16);
+    out.addAll([0x64, 0x61, 0x74, 0x61]); // data
+    put32(out, len);
+    out.addAll(pcm);
+    return out;
   }
 
   /// Text of the last finished index build, for the chat to post.

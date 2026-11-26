@@ -3,8 +3,10 @@
 // DuplicateService, CapabilityManager, and SystemOpsChannel.
 // Window size on desktop (880x720) is handled by the Windows runner.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'core/config.dart';
 import 'core/startup_log.dart';
@@ -16,6 +18,11 @@ import 'ui/home_shell.dart';
 Future<void> main() async {
   StartupLog.log('main() entered');
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    try {
+      await windowManager.ensureInitialized();
+    } catch (_) {}
+  }
   final dataDir = await ConfigRepository.defaultDataDir();
   StartupLog.log('dataDir resolved');
   final systemOps = SystemOpsChannel();

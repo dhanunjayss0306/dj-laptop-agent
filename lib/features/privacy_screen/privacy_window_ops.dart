@@ -67,8 +67,17 @@ abstract class PrivacyWindowOps {
 
 class _RealPrivacyWindowOps implements PrivacyWindowOps {
   bool _blackedOut = false;
+  bool _initialized = false;
   Rect? _panelBounds;
   bool _hiddenBeforeBlackout = false;
+
+  Future<void> _ensureInit() async {
+    if (_initialized || !Platform.isWindows) return;
+    try {
+      await windowManager.ensureInitialized();
+      _initialized = true;
+    } catch (_) {}
+  }
 
   @override
   bool get isBlackedOut => _blackedOut;
@@ -76,6 +85,7 @@ class _RealPrivacyWindowOps implements PrivacyWindowOps {
   @override
   Future<void> preparePanel() async {
     if (!Platform.isWindows) return;
+    await _ensureInit();
     try {
       _panelBounds = await windowManager.getBounds();
     } catch (_) {
@@ -87,9 +97,20 @@ class _RealPrivacyWindowOps implements PrivacyWindowOps {
   Future<void> showBlackout() async {
     if (!Platform.isWindows) return;
     if (_blackedOut) return;
+    await _ensureInit();
     try {
-      _hiddenBeforeBlackout = !(await windowManager.isVisible());
-      _panelBounds ??= await windowManager.getBounds();
+      try {
+        _hiddenBeforeBlackout = !(await windowManager.isVisible());
+      } catch (_) {
+        _hiddenBeforeBlackout = false;
+      }
+      if (_panelBounds == null) {
+        try {
+          _panelBounds = await windowManager.getBounds();
+        } catch (_) {
+          _panelBounds = _defaultPanelBounds();
+        }
+      }
       await windowManager.show();
       await _coverAllDisplays();
       await windowManager.setAlwaysOnTop(true);
@@ -124,19 +145,24 @@ class _RealPrivacyWindowOps implements PrivacyWindowOps {
       return;
     }
 
-    final CoverRect? cover = computeCoverRect(
-      displays.map((Display d) {
-        final Offset origin = d.visiblePosition ?? Offset.zero;
-        return DisplayBounds(
-          left: origin.dx,
-          top: origin.dy,
-          width: d.size.width,
-          height: d.size.height,
-          scaleFactor: (d.scaleFactor ?? 1).toDouble(),
-        );
-      }).toList(),
-      windowScaleFactor: windowManager.getDevicePixelRatio(),
-    );
+    CoverRect? cover;
+    try {
+      cover = computeCoverRect(
+        displays.map((Display d) {
+          final Offset origin = d.visiblePosition ?? Offset.zero;
+          return DisplayBounds(
+            left: origin.dx,
+            top: origin.dy,
+            width: d.size.width,
+            height: d.size.height,
+            scaleFactor: (d.scaleFactor ?? 1).toDouble(),
+          );
+        }).toList(),
+        windowScaleFactor: windowManager.getDevicePixelRatio(),
+      );
+    } catch (_) {
+      cover = null;
+    }
 
     // Never trust a nonsensical rectangle. A bad cover is worse than a
     // single-monitor one, because it could leave the primary screen bare

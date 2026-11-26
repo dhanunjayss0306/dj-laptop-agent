@@ -37,6 +37,10 @@ class VoiceChannel {
       StreamController<String>.broadcast();
   final StreamController<bool> _listeningController =
       StreamController<bool>.broadcast();
+  final StreamController<double> _levelController =
+      StreamController<double>.broadcast();
+  final StreamController<void> _silenceController =
+      StreamController<void>.broadcast();
 
   /// Live partial speech results from Android SpeechRecognizer.
   Stream<String> get onPartialResult => _partialController.stream;
@@ -49,6 +53,12 @@ class VoiceChannel {
 
   /// Listening state changes (true = mic open, false = stopped).
   Stream<bool> get onListeningChanged => _listeningController.stream;
+
+  /// Normalized mic RMS audio level (0.0..1.0) while listening.
+  Stream<double> get onAudioLevel => _levelController.stream;
+
+  /// Emits when Windows detects end-of-utterance silence after speech.
+  Stream<void> get onSilenceDetected => _silenceController.stream;
 
   Future<void> _handleNativeCall(MethodCall call) async {
     final args = call.arguments;
@@ -67,20 +77,32 @@ class VoiceChannel {
         if (!_listeningController.isClosed) _listeningController.add(true);
       case 'onListeningStopped':
         if (!_listeningController.isClosed) _listeningController.add(false);
+      case 'onAudioLevel':
+        final raw = args is Map ? args['level'] : null;
+        final level = raw is num ? raw.toDouble() : 0.0;
+        if (!_levelController.isClosed) _levelController.add(level);
+      case 'onSilenceDetected':
+        if (!_silenceController.isClosed) _silenceController.add(null);
     }
   }
 
-  /// Starts built-in speech recognition (Android SpeechRecognizer).
+  /// Starts built-in speech recognition (Android) or mic capture (Windows).
   Future<Map<String, dynamic>> startListening() => _invoke('startListening');
 
-  /// Stops built-in speech recognition.
+  /// Stops speech recognition / mic capture (returns `wavBase64` on Windows).
   Future<Map<String, dynamic>> stopListening() => _invoke('stopListening');
+
+  /// Plays an in-memory WAV buffer (`wavBase64`).
+  Future<Map<String, dynamic>> playAudioBase64(String wavBase64) =>
+      _invoke('playAudio', <String, dynamic>{'wavBase64': wavBase64});
 
   Future<void> dispose() async {
     await _partialController.close();
     await _finalController.close();
     await _errorController.close();
     await _listeningController.close();
+    await _levelController.close();
+    await _silenceController.close();
   }
 
   /// Speaks [text] with Windows SAPI (ISpVoice), offline. Returns

@@ -56,6 +56,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib"
                                              "uuid.lib" "sapi.lib"
                                              "winhttp.lib" "gdiplus.lib"
+                                             "winmm.lib"
                                              "mfplat.lib" "mf.lib"
                                              "mfreadwrite.lib" "mfuuid.lib"
                                              "shlwapi.lib")

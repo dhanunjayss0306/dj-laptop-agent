@@ -253,9 +253,10 @@ class _CommandPageState extends State<CommandPage> {
                 const SizedBox(width: 4),
               ],
               IconButton(
-                tooltip: 'Ask DJ about your screen',
+                tooltip: 'Hey DJ (Voice + Screen)',
                 icon: const Icon(Icons.auto_awesome, size: 20),
-                onPressed: _busy ? null : () => runScreenQaFlow(context, widget.app),
+                onPressed:
+                    _busy ? null : () => runScreenQaFlow(context, widget.app),
               ),
               const SizedBox(width: 4),
               ElevatedButton(

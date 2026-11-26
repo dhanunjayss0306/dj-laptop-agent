@@ -439,6 +439,9 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   });
 }
 
+const MAX_WAV_BASE64_CHARS = 10_000_000;
+const ALLOWED_TTS_FORMATS = new Set(['mp3_44100_128', 'pcm_16000', 'pcm_22050', 'pcm_24000']);
+
 async function handleTts(request: Request, env: Env): Promise<Response> {
   const body = await readJsonBody(request);
   if (typeof body !== 'object' || body === null) {
@@ -456,11 +459,15 @@ async function handleTts(request: Request, env: Env): Promise<Response> {
   if (voiceId === '') {
     return errorJson('no ElevenLabs voice configured', 500);
   }
+  const format =
+    typeof b.format === 'string' && ALLOWED_TTS_FORMATS.has(b.format)
+      ? b.format
+      : 'mp3_44100_128';
 
   let upstream: Response;
   try {
     upstream = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${encodeURIComponent(format)}`,
       {
         method: 'POST',
         headers: {
@@ -481,10 +488,124 @@ async function handleTts(request: Request, env: Env): Promise<Response> {
     }
     return errorJson(`text-to-speech provider error (${upstream.status})`, 502);
   }
+  const contentType = format.startsWith('pcm_') ? 'audio/pcm' : 'audio/mpeg';
   return new Response(upstream.body, {
     status: 200,
-    headers: { 'content-type': 'audio/mpeg', 'cache-control': 'no-cache' },
+    headers: { 'content-type': contentType, 'cache-control': 'no-cache' },
   });
+}
+
+function decodeBase64Bytes(b64: string): Uint8Array | null {
+  try {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      out[i] = bin.charCodeAt(i);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+async function handleTranscribe(request: Request, env: Env): Promise<Response> {
+  const body = await readJsonBody(request);
+  if (typeof body !== 'object' || body === null) {
+    return errorJson('bad transcribe request: need {wavBase64}', 400);
+  }
+  const b = body as Record<string, unknown>;
+  const rawB64 = typeof b.wavBase64 === 'string' ? b.wavBase64.trim() : '';
+  if (rawB64 === '' || rawB64.length > MAX_WAV_BASE64_CHARS) {
+    return errorJson('bad transcribe request: invalid wavBase64 size', 400);
+  }
+  const bytes = decodeBase64Bytes(rawB64);
+  if (bytes === null || bytes.byteLength < 44) {
+    return errorJson('bad transcribe request: malformed audio', 400);
+  }
+
+  // Try Groq Whisper first (fastest free tier), then OpenAI Whisper, then Gemini multimodal.
+  if (env.GROQ_API_KEY) {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'audio/wav' }), 'speech.wav');
+    form.append('model', 'whisper-large-v3-turbo');
+    let upstream: Response;
+    try {
+      upstream = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.GROQ_API_KEY}` },
+        body: form,
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch {
+      return errorJson('transcription provider unreachable', 502);
+    }
+    if (!upstream.ok) {
+      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
+      return errorJson(`transcription provider error (${upstream.status})`, 502);
+    }
+    const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
+    return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
+  }
+
+  if (env.OPENAI_API_KEY) {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'audio/wav' }), 'speech.wav');
+    form.append('model', 'whisper-1');
+    let upstream: Response;
+    try {
+      upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: form,
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch {
+      return errorJson('transcription provider unreachable', 502);
+    }
+    if (!upstream.ok) {
+      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
+      return errorJson(`transcription provider error (${upstream.status})`, 502);
+    }
+    const parsed = (await upstream.json().catch(() => null)) as { text?: unknown } | null;
+    return json({ ok: true, text: typeof parsed?.text === 'string' ? parsed.text.trim() : '' });
+  }
+
+  if (env.GEMINI_API_KEY) {
+    let upstream: Response;
+    try {
+      upstream = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: 'Transcribe the spoken speech in this audio verbatim. Return only the transcript text.' },
+                  { inline_data: { mime_type: 'audio/wav', data: rawB64 } },
+                ],
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+        },
+      );
+    } catch {
+      return errorJson('transcription provider unreachable', 502);
+    }
+    if (!upstream.ok) {
+      if (isAuthError(upstream.status)) return errorJson('cloud key expired', upstream.status);
+      return errorJson(`transcription provider error (${upstream.status})`, 502);
+    }
+    const data = (await upstream.json().catch(() => null)) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }>;
+    } | null;
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return json({ ok: true, text: typeof text === 'string' ? text.trim() : '' });
+  }
+
+  return errorJson('no speech transcription key configured in worker', 503);
 }
 
 async function handleTranscribeToken(env: Env): Promise<Response> {
@@ -547,7 +668,7 @@ export default {
     // Shared-key auth (only enforced when DJ_SHARED_KEY is set).
     // /health stays open; OPTIONS preflight above already passed through.
     const isProtectedRoute =
-      (request.method === 'POST' && (url.pathname === '/chat' || url.pathname === '/tts')) ||
+      (request.method === 'POST' && (url.pathname === '/chat' || url.pathname === '/tts' || url.pathname === '/transcribe')) ||
       ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/transcribe-token');
     if (isProtectedRoute && !isAuthorized(request, env)) {
       return withCors(errorJson('unauthorized', 401), cors);
@@ -561,6 +682,8 @@ export default {
         response = await handleChat(request, env);
       } else if (request.method === 'POST' && url.pathname === '/tts') {
         response = await handleTts(request, env);
+      } else if (request.method === 'POST' && url.pathname === '/transcribe') {
+        response = await handleTranscribe(request, env);
       } else if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/transcribe-token') {
         response = await handleTranscribeToken(env);
       } else {

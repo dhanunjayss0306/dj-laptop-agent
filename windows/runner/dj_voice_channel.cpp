@@ -11,6 +11,9 @@
 #include <sapi.h>
 #include <winhttp.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -26,6 +29,107 @@ constexpr const char* kWhisperMissingMessage =
     "whisper not installed — see WINDOWS-BUILD.md";
 constexpr const wchar_t* kWhisperHost = L"127.0.0.1";
 constexpr INTERNET_PORT kWhisperPort = 8080;
+constexpr const wchar_t kVoiceMsgClassName[] = L"DJ_VOICE_MSG_WINDOW";
+constexpr DWORD kMicSampleRate = 16000;
+constexpr WORD kMicChannels = 1;
+constexpr WORD kMicBits = 16;
+
+void RegisterVoiceMsgClass() {
+  static bool registered = false;
+  if (registered) return;
+  WNDCLASSW wc{};
+  wc.lpfnWndProc = DjVoiceChannel::VoiceWndProc;
+  wc.hInstance = ::GetModuleHandle(nullptr);
+  wc.lpszClassName = kVoiceMsgClassName;
+  ::RegisterClassW(&wc);
+  registered = true;
+}
+
+std::string Base64EncodeBytes(const std::vector<uint8_t>& data) {
+  static constexpr char kAlphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve(((data.size() + 2) / 3) * 4);
+  size_t i = 0;
+  while (i < data.size()) {
+    const uint32_t b0 = data[i++];
+    const bool has1 = i < data.size();
+    const uint32_t b1 = has1 ? data[i++] : 0u;
+    const bool has2 = i < data.size();
+    const uint32_t b2 = has2 ? data[i++] : 0u;
+    const uint32_t triple = (b0 << 16) | (b1 << 8) | b2;
+    out.push_back(kAlphabet[(triple >> 18) & 0x3Fu]);
+    out.push_back(kAlphabet[(triple >> 12) & 0x3Fu]);
+    out.push_back(has1 ? kAlphabet[(triple >> 6) & 0x3Fu] : '=');
+    out.push_back(has2 ? kAlphabet[triple & 0x3Fu] : '=');
+  }
+  return out;
+}
+
+int Base64Val(unsigned char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+std::vector<uint8_t> Base64DecodeBytes(const std::string& input) {
+  std::vector<uint8_t> out;
+  out.reserve((input.size() / 4) * 3);
+  int val = 0;
+  int valb = -8;
+  for (unsigned char c : input) {
+    const int d = Base64Val(c);
+    if (d == -1) {
+      if (c == '=') break;
+      continue;
+    }
+    val = (val << 6) + d;
+    valb += 6;
+    if (valb >= 0) {
+      out.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
+      valb -= 8;
+    }
+  }
+  return out;
+}
+
+void AppendLe16(std::vector<uint8_t>* buf, uint16_t v) {
+  buf->push_back(static_cast<uint8_t>(v & 0xFFu));
+  buf->push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+}
+
+void AppendLe32(std::vector<uint8_t>* buf, uint32_t v) {
+  buf->push_back(static_cast<uint8_t>(v & 0xFFu));
+  buf->push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+  buf->push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
+  buf->push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+}
+
+std::vector<uint8_t> BuildPcmWav(const std::vector<int16_t>& samples) {
+  const uint32_t data_bytes = static_cast<uint32_t>(samples.size() * 2);
+  std::vector<uint8_t> wav;
+  wav.reserve(44 + data_bytes);
+  wav.insert(wav.end(), {'R', 'I', 'F', 'F'});
+  AppendLe32(&wav, 36 + data_bytes);
+  wav.insert(wav.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+  AppendLe32(&wav, 16);
+  AppendLe16(&wav, 1);
+  AppendLe16(&wav, kMicChannels);
+  AppendLe32(&wav, kMicSampleRate);
+  AppendLe32(&wav, kMicSampleRate * kMicChannels * (kMicBits / 8));
+  AppendLe16(&wav, static_cast<uint16_t>(kMicChannels * (kMicBits / 8)));
+  AppendLe16(&wav, kMicBits);
+  wav.insert(wav.end(), {'d', 'a', 't', 'a'});
+  AppendLe32(&wav, data_bytes);
+  if (data_bytes > 0) {
+    const uint8_t* raw = reinterpret_cast<const uint8_t*>(samples.data());
+    wav.insert(wav.end(), raw, raw + data_bytes);
+  }
+  return wav;
+}
 
 // Extracts the value of the "text" string field from a small JSON object.
 // Minimal on purpose (no JSON library in the runner): finds "text", then
@@ -148,6 +252,15 @@ DjVoiceChannel::~DjVoiceChannel() {
   // Unregister first: destroying the MethodChannel does not unregister
   // the handler, and a late Dart call must not reach a dead object.
   channel_.SetMethodCallHandler(nullptr);
+  std::vector<uint8_t> discarded_wav;
+  int64_t discarded_ms = 0;
+  StopRecordingInternal(&discarded_wav, &discarded_ms);
+  ::PlaySoundW(nullptr, nullptr, 0);
+  if (msg_hwnd_ != nullptr) {
+    ::KillTimer(msg_hwnd_, kLevelTimerId);
+    ::DestroyWindow(msg_hwnd_);
+    msg_hwnd_ = nullptr;
+  }
   if (voice_ != nullptr) {
     voice_->Release();
     voice_ = nullptr;
@@ -157,6 +270,77 @@ DjVoiceChannel::~DjVoiceChannel() {
     ::CloseHandle(whisper_process_.hProcess);
     ::CloseHandle(whisper_process_.hThread);
     whisper_running_ = false;
+  }
+}
+
+LRESULT CALLBACK DjVoiceChannel::VoiceWndProc(HWND hwnd, UINT message,
+                                              WPARAM wparam, LPARAM lparam) {
+  if (message == WM_TIMER && wparam == kLevelTimerId) {
+    auto* self = reinterpret_cast<DjVoiceChannel*>(
+        ::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (self != nullptr && self->recording_.load()) {
+      double level = 0.0;
+      bool emit_silence = false;
+      {
+        std::lock_guard<std::mutex> lock(self->mic_mutex_);
+        level = self->latest_level_;
+        if (self->speech_seen_ && self->speech_ms_ >= 350 &&
+            self->silence_ms_ >= 1300 && !self->silence_emitted_) {
+          self->silence_emitted_ = true;
+          emit_silence = true;
+        }
+      }
+      self->channel_.InvokeMethod(
+          "onAudioLevel",
+          std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
+              {flutter::EncodableValue("level"), flutter::EncodableValue(level)},
+          }));
+      if (emit_silence) {
+        self->channel_.InvokeMethod(
+            "onSilenceDetected",
+            std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{}));
+      }
+    }
+    return 0;
+  }
+  return ::DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+void DjVoiceChannel::EnsureTimerWindow() {
+  if (msg_hwnd_ != nullptr) return;
+  RegisterVoiceMsgClass();
+  msg_hwnd_ = ::CreateWindowExW(0, kVoiceMsgClassName, L"", 0, 0, 0, 0, 0,
+                                HWND_MESSAGE, nullptr,
+                                ::GetModuleHandle(nullptr), nullptr);
+  if (msg_hwnd_ != nullptr) {
+    ::SetWindowLongPtrW(msg_hwnd_, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(this));
+  }
+}
+
+void DjVoiceChannel::StopRecordingInternal(std::vector<uint8_t>* out_wav,
+                                           int64_t* out_ms) {
+  const bool was_recording = recording_.exchange(false);
+  if (msg_hwnd_ != nullptr) {
+    ::KillTimer(msg_hwnd_, kLevelTimerId);
+  }
+  if (record_thread_.joinable()) {
+    record_thread_.join();
+  }
+  if (was_recording) {
+    std::lock_guard<std::mutex> lock(mic_mutex_);
+    *out_wav = BuildPcmWav(pcm_samples_);
+    *out_ms = static_cast<int64_t>((pcm_samples_.size() * 1000) / kMicSampleRate);
+    std::fill(pcm_samples_.begin(), pcm_samples_.end(), int16_t{0});
+    pcm_samples_.clear();
+    latest_level_ = 0.0;
+    speech_seen_ = false;
+    silence_emitted_ = false;
+    speech_ms_ = 0;
+    silence_ms_ = 0;
+  } else {
+    out_wav->clear();
+    *out_ms = 0;
   }
 }
 
@@ -235,18 +419,152 @@ void DjVoiceChannel::HandleMethodCall(
     return;
   }
 
-  if (method == "stopSpeak") {
-    ISpVoice* voice = Voice();
-    if (voice == nullptr) {
-      result->Success(Err("Windows speech (SAPI) is not available."));
+  if (method == "startListening") {
+    if (recording_.load()) {
+      result->Success(OkWithMessage("Already listening."));
       return;
     }
-    // Speaking empty text with PURGEBEFORESPEAK clears the queue.
-    HRESULT hr = voice->Speak(L"", SPF_ASYNC | SPF_PURGEBEFORESPEAK, nullptr);
-    if (FAILED(hr)) {
-      result->Success(
-          Err("Could not stop speech (" + LastErrorMessage() + ")."));
+    if (::waveInGetNumDevs() == 0) {
+      result->Success(Err("No microphone found on this laptop."));
       return;
+    }
+    WAVEFORMATEX wf{};
+    wf.wFormatTag = WAVE_FORMAT_PCM;
+    wf.nChannels = kMicChannels;
+    wf.nSamplesPerSec = kMicSampleRate;
+    wf.wBitsPerSample = kMicBits;
+    wf.nBlockAlign = (wf.nChannels * wf.wBitsPerSample) / 8;
+    wf.nAvgBytesPerSec = wf.nSamplesPerSec * wf.nBlockAlign;
+
+    HWAVEIN probe_in = nullptr;
+    const MMRESULT open_res = ::waveInOpen(
+        &probe_in, WAVE_MAPPER, &wf, 0, 0, CALLBACK_NULL);
+    if (open_res != MMSYSERR_NOERROR || probe_in == nullptr) {
+      result->Success(Err("Could not open the microphone."));
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(mic_mutex_);
+      pcm_samples_.clear();
+      latest_level_ = 0.0;
+      speech_seen_ = false;
+      silence_emitted_ = false;
+      speech_ms_ = 0;
+      silence_ms_ = 0;
+    }
+    recording_.store(true);
+    EnsureTimerWindow();
+    if (msg_hwnd_ != nullptr) {
+      ::SetTimer(msg_hwnd_, kLevelTimerId, 60, nullptr);
+    }
+    record_thread_ = std::thread([this, probe_in]() {
+      constexpr int kBufCount = 4;
+      constexpr DWORD kChunkSamples = 800;  // 50 ms at 16 kHz
+      std::vector<std::vector<int16_t>> buffers(
+          kBufCount, std::vector<int16_t>(kChunkSamples, 0));
+      WAVEHDR headers[kBufCount]{};
+      for (int i = 0; i < kBufCount; ++i) {
+        headers[i].lpData = reinterpret_cast<LPSTR>(buffers[i].data());
+        headers[i].dwBufferLength = kChunkSamples * sizeof(int16_t);
+        ::waveInPrepareHeader(probe_in, &headers[i], sizeof(WAVEHDR));
+        ::waveInAddBuffer(probe_in, &headers[i], sizeof(WAVEHDR));
+      }
+      ::waveInStart(probe_in);
+      while (recording_.load()) {
+        bool any_done = false;
+        for (int i = 0; i < kBufCount; ++i) {
+          if ((headers[i].dwFlags & WHDR_DONE) != 0) {
+            any_done = true;
+            const size_t count = headers[i].dwBytesRecorded / sizeof(int16_t);
+            if (count > 0) {
+              double sum_sq = 0.0;
+              for (size_t s = 0; s < count; ++s) {
+                const double v = static_cast<double>(buffers[i][s]) / 32768.0;
+                sum_sq += v * v;
+              }
+              const double rms = std::sqrt(sum_sq / static_cast<double>(count));
+              const double norm = std::min(1.0, rms * 8.0);
+              std::lock_guard<std::mutex> lock(mic_mutex_);
+              // Cap buffer at ~45 s to keep memory bounded.
+              if (pcm_samples_.size() < kMicSampleRate * 45) {
+                pcm_samples_.insert(
+                    pcm_samples_.end(), buffers[i].begin(),
+                    buffers[i].begin() + static_cast<std::ptrdiff_t>(count));
+              }
+              latest_level_ = norm;
+              if (rms > 0.015) {
+                speech_seen_ = true;
+                speech_ms_ += 50;
+                silence_ms_ = 0;
+              } else if (speech_seen_) {
+                silence_ms_ += 50;
+              }
+            }
+            if (recording_.load()) {
+              headers[i].dwFlags &= ~WHDR_DONE;
+              headers[i].dwBytesRecorded = 0;
+              ::waveInAddBuffer(probe_in, &headers[i], sizeof(WAVEHDR));
+            }
+          }
+        }
+        if (!any_done) {
+          ::Sleep(15);
+        }
+      }
+      ::waveInStop(probe_in);
+      ::waveInReset(probe_in);
+      for (int i = 0; i < kBufCount; ++i) {
+        ::waveInUnprepareHeader(probe_in, &headers[i], sizeof(WAVEHDR));
+      }
+      ::waveInClose(probe_in);
+    });
+    result->Success(OkWithMessage("Listening."));
+    return;
+  }
+
+  if (method == "stopListening") {
+    std::vector<uint8_t> wav;
+    int64_t duration_ms = 0;
+    StopRecordingInternal(&wav, &duration_ms);
+    flutter::EncodableMap out;
+    out[flutter::EncodableValue("ok")] = flutter::EncodableValue(!wav.empty());
+    out[flutter::EncodableValue("wavBase64")] =
+        flutter::EncodableValue(Base64EncodeBytes(wav));
+    out[flutter::EncodableValue("durationMs")] =
+        flutter::EncodableValue(duration_ms);
+    result->Success(flutter::EncodableValue(std::move(out)));
+    return;
+  }
+
+  if (method == "playAudio") {
+    std::string b64;
+    if (!GetStringArg(call, "wavBase64", &b64) || b64.empty()) {
+      result->Success(Err("playAudio needs 'wavBase64'."));
+      return;
+    }
+    std::vector<uint8_t> decoded = Base64DecodeBytes(b64);
+    if (decoded.size() <= 44) {
+      result->Success(Err("playAudio received malformed WAV bytes."));
+      return;
+    }
+    ::PlaySoundW(nullptr, nullptr, 0);
+    playback_wav_ = std::move(decoded);
+    const BOOL played = ::PlaySoundW(
+        reinterpret_cast<LPCWSTR>(playback_wav_.data()), nullptr,
+        SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+    if (!played) {
+      result->Success(Err("Could not play audio."));
+      return;
+    }
+    result->Success(OkWithMessage("Playing."));
+    return;
+  }
+
+  if (method == "stopSpeak" || method == "stopSpeaking") {
+    ::PlaySoundW(nullptr, nullptr, 0);
+    ISpVoice* voice = Voice();
+    if (voice != nullptr) {
+      voice->Speak(L"", SPF_ASYNC | SPF_PURGEBEFORESPEAK, nullptr);
     }
     result->Success(Ok());
     return;

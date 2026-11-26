@@ -5,6 +5,7 @@
 // The shell also listens for the global hotkey / floating-button
 // press and runs the ScreenQA flow on it.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -186,6 +187,30 @@ class _HomeShellState extends State<HomeShell> {
                       );
                     },
                   ),
+                  if (wide && Platform.isWindows)
+                    ValueListenableBuilder<bool>(
+                      valueListenable: app.companionFollow,
+                      builder: (context, following, _) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: OutlinedButton.icon(
+                            onPressed: () =>
+                                app.setCompanionFollow(!following),
+                            icon: Icon(
+                              following
+                                  ? Icons.near_me
+                                  : Icons.near_me_outlined,
+                              size: 18,
+                              color:
+                                  following ? const Color(0xFF0071E3) : null,
+                            ),
+                            label: Text(
+                              following ? 'Floating DJ' : 'Float DJ',
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   // Narrow screens: the provider chip ('Cloud (gemini)')
                   // plus the hamburger plus a labelled Search button
                   // overflow a 390px AppBar by ~23px, so the Search

@@ -93,6 +93,8 @@ class DjCursorChannel {
   void StopAnimation();
   void StartPulseTimer();
   void StopPulseTimer();
+  void StartFollowTimer();
+  void StopFollowTimer();
   bool HasAnnotations() const { return !annotations_.empty(); }
 
   flutter::MethodChannel<flutter::EncodableValue> channel_;
@@ -103,8 +105,11 @@ class DjCursorChannel {
   std::wstring label_;
   CompanionState companion_state_ = CompanionState::kHidden;
   std::wstring caption_text_;
+  double audio_level_ = 0.0;
+  bool follow_cursor_ = false;
   int pulse_tick_ = 0;
   bool pulse_timer_active_ = false;
+  bool follow_timer_active_ = false;
   // Current overlay size. Cursor-only: kOverlayWidth x kOverlayHeight.
   // With annotations: the whole virtual screen.
   int overlay_w_ = 0;
@@ -119,6 +124,7 @@ class DjCursorChannel {
   DWORD anim_start_ = 0;
   static constexpr UINT_PTR kAnimTimerId = 1;
   static constexpr UINT_PTR kPulseTimerId = 2;
+  static constexpr UINT_PTR kFollowTimerId = 3;
   static constexpr DWORD kAnimDurationMs = 420;
 };
 

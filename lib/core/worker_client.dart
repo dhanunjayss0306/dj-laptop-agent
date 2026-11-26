@@ -149,18 +149,36 @@ class WorkerClient {
     }
   }
 
-  /// Text-to-speech through the Worker. Yields raw audio bytes (MP3).
-  /// [voiceId] overrides the Worker's default voice when given.
-  Stream<List<int>> tts({required String text, String? voiceId}) async* {
+  /// Text-to-speech through the Worker. Yields raw audio bytes (MP3 by
+  /// default, or PCM when [format] is e.g. 'pcm_16000').
+  Stream<List<int>> tts({
+    required String text,
+    String? voiceId,
+    String? format,
+  }) async* {
     final request = await _open('POST', '/tts');
     request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
     request.write(jsonEncode({
       'text': text,
       if (voiceId != null) 'voiceId': voiceId,
+      if (format != null) 'format': format,
     }));
     final response = await request.close().timeout(timeout);
     await _throwIfError(response);
     yield* response;
+  }
+
+  /// Transcribe an in-memory 16 kHz mono WAV buffer via the Worker's
+  /// `/transcribe` endpoint (Groq Whisper / OpenAI Whisper / Gemini).
+  Future<String> transcribeWav(List<int> wavBytes) async {
+    final request = await _open('POST', '/transcribe');
+    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+    request.write(jsonEncode({'wavBase64': base64Encode(wavBytes)}));
+    final response = await request.close().timeout(const Duration(seconds: 30));
+    await _throwIfError(response);
+    final body = await _readJson(response);
+    final text = body['text'];
+    return text is String ? text.trim() : '';
   }
 
   /// A short-lived AssemblyAI realtime token for streaming transcription.

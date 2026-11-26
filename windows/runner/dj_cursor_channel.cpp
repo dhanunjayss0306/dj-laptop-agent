@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <utility>
 
 #include "dj_channel_utils.h"
@@ -156,6 +157,7 @@ DjCursorChannel::~DjCursorChannel() {
   channel_.SetMethodCallHandler(nullptr);
   StopAnimation();
   StopPulseTimer();
+  StopFollowTimer();
   if (overlay_ != nullptr) {
     ::DestroyWindow(overlay_);
     overlay_ = nullptr;
@@ -171,12 +173,47 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
     if (self != nullptr) {
       if (wparam == kPulseTimerId) {
         self->pulse_tick_ = (self->pulse_tick_ + 1) % 360;
+        if (self->follow_cursor_ && !self->animating_ &&
+            !self->HasAnnotations()) {
+          POINT pt{};
+          if (::GetCursorPos(&pt)) {
+            const int tx = pt.x + 22;
+            const int ty = pt.y + 18;
+            self->x_ += (tx - self->x_) / 3;
+            self->y_ += (ty - self->y_) / 3;
+            ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_, self->y_, 0, 0,
+                           SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+          }
+        }
         if (self->visible_ &&
             (self->companion_state_ == CompanionState::kListening ||
              self->companion_state_ == CompanionState::kThinking)) {
           self->DrawOverlay();
         } else {
           self->StopPulseTimer();
+        }
+        return 0;
+      }
+      if (wparam == kFollowTimerId) {
+        if (!self->follow_cursor_ || !self->visible_) {
+          self->StopFollowTimer();
+          return 0;
+        }
+        if (!self->animating_ && !self->HasAnnotations() &&
+            self->companion_state_ != CompanionState::kResponding) {
+          POINT pt{};
+          if (::GetCursorPos(&pt)) {
+            const int tx = pt.x + 22;
+            const int ty = pt.y + 18;
+            const int dx = tx - self->x_;
+            const int dy = ty - self->y_;
+            if (std::abs(dx) > 1 || std::abs(dy) > 1) {
+              self->x_ += (dx + (dx > 0 ? 2 : -2)) / 3;
+              self->y_ += (dy + (dy > 0 ? 2 : -2)) / 3;
+              ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_, self->y_, 0, 0,
+                             SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            }
+          }
         }
         return 0;
       }
@@ -417,11 +454,13 @@ void DjCursorChannel::DrawOverlay() {
     const int tip_x = x_ - origin_x;
     const int tip_y = y_ - origin_y;
     if (companion_state_ == CompanionState::kListening) {
-      // 5-bar animated blue waveform replacing the triangle while listening.
+      // 5-bar voice-reactive blue waveform replacing the triangle while listening.
+      const double gain = 0.25 + audio_level_ * 1.15;
       for (int i = 0; i < 5; ++i) {
         const double phase =
-            static_cast<double>(pulse_tick_) * 0.25 + static_cast<double>(i) * 0.7;
-        const int bar_h = 6 + static_cast<int>((std::sin(phase) + 1.0) * 7.0);
+            static_cast<double>(pulse_tick_) * 0.28 + static_cast<double>(i) * 0.75;
+        const int bar_h = std::max(
+            4, static_cast<int>((5.0 + (std::sin(phase) + 1.0) * 9.0) * gain));
         const int bx = tip_x + i * 5;
         const int by = tip_y + 12 - bar_h / 2;
         ::RoundRect(mem_dc, bx, by, bx + 3, by + bar_h, 2, 2);
@@ -534,6 +573,20 @@ void DjCursorChannel::StopPulseTimer() {
     ::KillTimer(overlay_, kPulseTimerId);
   }
   pulse_timer_active_ = false;
+}
+
+void DjCursorChannel::StartFollowTimer() {
+  if (!follow_timer_active_ && overlay_ != nullptr) {
+    ::SetTimer(overlay_, kFollowTimerId, 30, nullptr);
+    follow_timer_active_ = true;
+  }
+}
+
+void DjCursorChannel::StopFollowTimer() {
+  if (follow_timer_active_ && overlay_ != nullptr) {
+    ::KillTimer(overlay_, kFollowTimerId);
+  }
+  follow_timer_active_ = false;
 }
 
 void DjCursorChannel::HandleMethodCall(
@@ -668,6 +721,66 @@ void DjCursorChannel::HandleMethodCall(
       StopPulseTimer();
     }
     DrawOverlay();
+    result->Success(Ok());
+    return;
+  }
+
+  if (method == "setAudioLevel") {
+    double level = 0.0;
+    const flutter::EncodableMap* args =
+        std::get_if<flutter::EncodableMap>(call.arguments());
+    if (args != nullptr) {
+      const auto it = args->find(flutter::EncodableValue("level"));
+      if (it != args->end()) {
+        if (const double* d = std::get_if<double>(&it->second)) {
+          level = *d;
+        } else if (const int32_t* i32 = std::get_if<int32_t>(&it->second)) {
+          level = static_cast<double>(*i32);
+        }
+      }
+    }
+    audio_level_ = std::max(0.0, std::min(1.0, level));
+    if (visible_ && companion_state_ == CompanionState::kListening) {
+      DrawOverlay();
+    }
+    result->Success(Ok());
+    return;
+  }
+
+  if (method == "setCompanionFollow") {
+    bool follow = false;
+    GetBoolArg(call, "follow", &follow);
+    follow_cursor_ = follow;
+    if (follow_cursor_) {
+      companion_state_ = CompanionState::kIdle;
+      caption_text_.clear();
+      label_.clear();
+      POINT pt{};
+      if (::GetCursorPos(&pt)) {
+        x_ = pt.x + 22;
+        y_ = pt.y + 18;
+      }
+      EnsureWindow();
+      if (overlay_ != nullptr) {
+        if (!HasAnnotations()) {
+          RestoreCursorWindow();
+          ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, 0, 0,
+                         SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                             SWP_SHOWWINDOW);
+        }
+        visible_ = true;
+        DrawOverlay();
+        StartFollowTimer();
+      }
+    } else {
+      StopFollowTimer();
+      if (companion_state_ == CompanionState::kIdle && !HasAnnotations()) {
+        visible_ = false;
+        if (overlay_ != nullptr) {
+          ::ShowWindow(overlay_, SW_HIDE);
+        }
+      }
+    }
     result->Success(Ok());
     return;
   }

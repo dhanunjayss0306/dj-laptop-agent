@@ -107,6 +107,9 @@ class CursorOverlayHandler(private val activity: Activity) :
                     }
                     result.success(mapOf("ok" to true, "message" to "companion state updated"))
                 }
+                "setAudioLevel", "setCompanionFollow" -> {
+                    result.success(mapOf("ok" to true))
+                }
                 "annotate" -> {
                     val list = parseAnnotations(call)
                     annotate(list, result)

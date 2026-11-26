@@ -28,13 +28,17 @@
 #include <flutter/binary_messenger.h>
 #include <flutter/method_channel.h>
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 #include <windows.h>
 
-// ISpVoice is declared here, not in <windows.h>: this header must include
-// <sapi.h> itself so it compiles standalone (a missing sapi.h here was the
-// same class of bug as the dj_screen_channel ULONG_PTR failure).
+// Include after <windows.h> so standalone compilation succeeds cleanly.
+#include <mmsystem.h>
 #include <sapi.h>
 
 namespace dj {
@@ -44,10 +48,16 @@ class DjVoiceChannel {
   explicit DjVoiceChannel(flutter::BinaryMessenger* messenger);
   ~DjVoiceChannel();
 
+  static LRESULT CALLBACK VoiceWndProc(HWND hwnd, UINT message,
+                                       WPARAM wparam, LPARAM lparam);
+
  private:
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  void EnsureTimerWindow();
+  void StopRecordingInternal(std::vector<uint8_t>* out_wav, int64_t* out_ms);
 
   // Finds whisper-server.exe: <exe dir>\whisper-server.exe, then
   // <exe dir>\whisper\whisper-server.exe. Empty when not found.
@@ -62,6 +72,20 @@ class DjVoiceChannel {
   PROCESS_INFORMATION whisper_process_{};
   bool whisper_running_ = false;
   ISpVoice* voice_ = nullptr;
+
+  // In-memory WinMM microphone capture + WAV playback state.
+  HWND msg_hwnd_ = nullptr;
+  static constexpr UINT_PTR kLevelTimerId = 1;
+  std::atomic<bool> recording_{false};
+  std::thread record_thread_;
+  std::mutex mic_mutex_;
+  std::vector<int16_t> pcm_samples_;
+  double latest_level_ = 0.0;
+  bool speech_seen_ = false;
+  bool silence_emitted_ = false;
+  DWORD speech_ms_ = 0;
+  DWORD silence_ms_ = 0;
+  std::vector<uint8_t> playback_wav_;
 };
 
 }  // namespace dj

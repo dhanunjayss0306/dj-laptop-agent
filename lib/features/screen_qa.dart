@@ -323,6 +323,13 @@ class ScreenQA {
       if (speakAnswer && text.isNotEmpty) {
         await _voice.speak(text);
       }
+      if (points.isNotEmpty) {
+        final shapes = <Map<String, dynamic>>[
+          for (final pt in points)
+            <String, dynamic>{'type': 'circle', 'x': pt.x, 'y': pt.y, 'r': 24},
+        ];
+        await _cursor.annotate(shapes);
+      }
       for (var i = 0; i < points.length; i++) {
         if (isCancelled?.call() == true) break;
         final pt = points[i];

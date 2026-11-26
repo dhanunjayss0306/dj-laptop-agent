@@ -57,6 +57,16 @@ class CursorChannel {
     });
   }
 
+  /// Updates the voice-reactive waveform level (0.0..1.0) on Windows.
+  Future<bool> setAudioLevel(double level) async {
+    return _invoke('setAudioLevel', <String, dynamic>{'level': level});
+  }
+
+  /// Enables/disables Clicky-style floating companion follow mode on Windows.
+  Future<bool> setCompanionFollow(bool follow) async {
+    return _invoke('setCompanionFollow', <String, dynamic>{'follow': follow});
+  }
+
   /// Hides the fake cursor. Also clears any annotations (they persist
   /// until [clearAnnotations] or this call). Always returns true unless
   /// the channel itself fails. Throws nothing.
