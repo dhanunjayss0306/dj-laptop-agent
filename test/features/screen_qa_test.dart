@@ -5,6 +5,7 @@
 // injected to prove the parsing + cursor path works end to end.
 
 
+import 'package:dj/core/worker_client.dart';
 import 'package:dj/features/screen_qa.dart';
 import 'package:dj/platform/cursor_channel.dart';
 import 'package:dj/platform/screen_channel.dart';
@@ -121,5 +122,41 @@ void main() {
     final middle = q.pointFromWords('in the middle', width: 1000, height: 800);
     expect(middle.x, 500);
     expect(middle.y, 400);
+  });
+
+  test('askStreaming emits live fake lyrics and parses multi-screen points',
+      () async {
+    final updates = <(String, String)>[];
+    final q = ScreenQA(
+      screen: ScreenChannel(),
+      cursor: CursorChannel(),
+      voice: VoiceChannel(),
+      modelUp: () => true,
+      visionStreamChat: ({
+        required Uint8List png,
+        required String question,
+        required int width,
+        required int height,
+        List<ChatMessage> history = const [],
+      }) async* {
+        yield 'Click File ';
+        yield '[POINT:100,200:File] then ';
+        yield 'Export [POINT:300,400:Export:screen2].';
+      },
+    );
+
+    final ans = await q.askStreaming(
+      'How do I export?',
+      onCompanionUpdate: (state, text) => updates.add((state, text)),
+    );
+    expect(ans.modelUsed, isTrue);
+    expect(ans.points.length, 2);
+    expect(ans.points[0].label, 'File');
+    expect(ans.points[1].screen, 2);
+    expect(ans.text, 'Click File  then Export .');
+    expect(
+      updates.any((u) => u.$1 == 'responding' && u.$2.contains('Click File')),
+      isTrue,
+    );
   });
 }

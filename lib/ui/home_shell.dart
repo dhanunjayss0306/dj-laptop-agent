@@ -62,6 +62,7 @@ class _HomeShellState extends State<HomeShell> {
   // tab instead of pointing at the wrong page.
   int _lastPrimary = 0;
   StreamSubscription<void>? _hotkeySub;
+  StreamSubscription<void>? _cancelSub;
   bool _screenQaRunning = false;
   // Pages are built lazily: only the Command Center (index 0) exists
   // at startup. Every other page is built the first time it is opened
@@ -84,6 +85,7 @@ class _HomeShellState extends State<HomeShell> {
       final primary = _primaryIndices.indexOf(page);
       if (primary != -1) _lastPrimary = primary;
     });
+    widget.app.privacyScreen.service.keepPreviewFrame = (page == 9);
   }
 
   @override
@@ -97,6 +99,11 @@ class _HomeShellState extends State<HomeShell> {
       runScreenQaFlow(context, widget.app)
           .whenComplete(() => _screenQaRunning = false);
     });
+    _cancelSub = widget.app.hotkeyChannel.onCancelPressed.listen((_) {
+      widget.app.voiceChannel.stopSpeak();
+      widget.app.cursorChannel.hideCursor();
+      widget.app.updateCompanion('idle');
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!widget.app.indexer.hasIndex()) {
@@ -108,6 +115,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _hotkeySub?.cancel();
+    _cancelSub?.cancel();
     super.dispose();
   }
 
@@ -200,6 +208,15 @@ class _HomeShellState extends State<HomeShell> {
               ),
               body: Column(
                 children: [
+                  _DynamicIslandPill(
+                    app: app,
+                    onAsk: () {
+                      if (_screenQaRunning) return;
+                      _screenQaRunning = true;
+                      runScreenQaFlow(context, app)
+                          .whenComplete(() => _screenQaRunning = false);
+                    },
+                  ),
                   _Banners(app: app),
                   Expanded(
                     child: wide
@@ -536,6 +553,107 @@ class _Footer extends StatelessWidget {
             border: Border(top: BorderSide(color: Color(0xFFE5E5E5))),
           ),
           child: Text(message, style: const TextStyle(fontSize: 12)),
+        );
+      },
+    );
+  }
+}
+
+/// iOS-style Dynamic Island pill inside the app header. Shows "Ask DJ" when
+/// idle and expands with live streaming captions ("fake lyrics") while
+/// listening, thinking, or speaking.
+class _DynamicIslandPill extends StatelessWidget {
+  const _DynamicIslandPill({required this.app, required this.onAsk});
+
+  final DjAppState app;
+  final VoidCallback onAsk;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<({String state, String text})>(
+      valueListenable: app.companionState,
+      builder: (context, companion, _) {
+        final active = companion.state != 'idle';
+        final dotColor = switch (companion.state) {
+          'listening' => const Color(0xFF22C55E),
+          'thinking' => const Color(0xFFA78BFA),
+          'responding' => const Color(0xFF0071E3),
+          _ => const Color(0xFF0071E3),
+        };
+        final label = companion.text.isNotEmpty
+            ? companion.text
+            : switch (companion.state) {
+                'listening' => 'Listening...',
+                'thinking' => 'Thinking...',
+                'responding' => 'DJ',
+                _ => 'Ask DJ about your screen',
+              };
+        return Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 6),
+          child: Center(
+            child: InkWell(
+              onTap: active ? null : onAsk,
+              borderRadius: BorderRadius.circular(24),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                constraints: BoxConstraints(
+                  maxWidth: active ? 460 : 220,
+                  minWidth: active ? 240 : 180,
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111114),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: active ? dotColor : const Color(0xFF2A2A32),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: active ? 3 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (active) ...[
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          app.voiceChannel.stopSpeak();
+                          app.cursorChannel.hideCursor();
+                          app.updateCompanion('idle');
+                        },
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Color(0xFFB0B0B8),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
         );
       },
     );

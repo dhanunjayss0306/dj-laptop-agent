@@ -16,15 +16,72 @@
 // Voice is new work, not a port: the Electron app had no working voice
 // assistant (PORTING-SPEC.md §4).
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 class VoiceChannel {
   VoiceChannel({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel(_channelName);
+      : _channel = channel ?? const MethodChannel(_channelName) {
+    _channel.setMethodCallHandler(_handleNativeCall);
+  }
 
   static const String _channelName = 'com.dhanunjay.dj/voice';
 
   final MethodChannel _channel;
+  final StreamController<String> _partialController =
+      StreamController<String>.broadcast();
+  final StreamController<String> _finalController =
+      StreamController<String>.broadcast();
+  final StreamController<String> _errorController =
+      StreamController<String>.broadcast();
+  final StreamController<bool> _listeningController =
+      StreamController<bool>.broadcast();
+
+  /// Live partial speech results from Android SpeechRecognizer.
+  Stream<String> get onPartialResult => _partialController.stream;
+
+  /// Final speech transcript from Android SpeechRecognizer.
+  Stream<String> get onFinalResult => _finalController.stream;
+
+  /// Speech recognition error messages.
+  Stream<String> get onSpeechError => _errorController.stream;
+
+  /// Listening state changes (true = mic open, false = stopped).
+  Stream<bool> get onListeningChanged => _listeningController.stream;
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    final args = call.arguments;
+    String text() =>
+        args is Map ? (args['text']?.toString() ?? '') : '';
+    String message() =>
+        args is Map ? (args['message']?.toString() ?? '') : '';
+    switch (call.method) {
+      case 'onPartialResult':
+        if (!_partialController.isClosed) _partialController.add(text());
+      case 'onFinalResult':
+        if (!_finalController.isClosed) _finalController.add(text());
+      case 'onSpeechError':
+        if (!_errorController.isClosed) _errorController.add(message());
+      case 'onListeningStarted':
+        if (!_listeningController.isClosed) _listeningController.add(true);
+      case 'onListeningStopped':
+        if (!_listeningController.isClosed) _listeningController.add(false);
+    }
+  }
+
+  /// Starts built-in speech recognition (Android SpeechRecognizer).
+  Future<Map<String, dynamic>> startListening() => _invoke('startListening');
+
+  /// Stops built-in speech recognition.
+  Future<Map<String, dynamic>> stopListening() => _invoke('stopListening');
+
+  Future<void> dispose() async {
+    await _partialController.close();
+    await _finalController.close();
+    await _errorController.close();
+    await _listeningController.close();
+  }
 
   /// Speaks [text] with Windows SAPI (ISpVoice), offline. Returns
   /// {'ok': true} when speaking started, {'ok': false, 'message': ...}

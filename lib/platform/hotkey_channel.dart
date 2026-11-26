@@ -42,6 +42,8 @@ class HotkeyChannel {
       StreamController<void>.broadcast();
   final StreamController<void> _privacyPressedController =
       StreamController<void>.broadcast();
+  final StreamController<void> _cancelPressedController =
+      StreamController<void>.broadcast();
 
   /// Fires once per hotkey press, even when DJ is not the focused window.
   /// The native side sends no repeat events while the keys are held down.
@@ -53,6 +55,9 @@ class HotkeyChannel {
   Stream<void> get onPrivacyHotkeyPressed =>
       _privacyPressedController.stream;
 
+  /// Fires when the user taps the Dynamic Island cancel (✕) chip.
+  Stream<void> get onCancelPressed => _cancelPressedController.stream;
+
   Future<void> _handleNativeCall(MethodCall call) async {
     if (call.method == 'onHotkeyPressed') {
       if (!_pressedController.isClosed) {
@@ -61,6 +66,10 @@ class HotkeyChannel {
     } else if (call.method == 'onPrivacyHotkeyPressed') {
       if (!_privacyPressedController.isClosed) {
         _privacyPressedController.add(null);
+      }
+    } else if (call.method == 'onCancelPressed') {
+      if (!_cancelPressedController.isClosed) {
+        _cancelPressedController.add(null);
       }
     }
   }
@@ -162,5 +171,6 @@ class HotkeyChannel {
   Future<void> dispose() async {
     await _pressedController.close();
     await _privacyPressedController.close();
+    await _cancelPressedController.close();
   }
 }

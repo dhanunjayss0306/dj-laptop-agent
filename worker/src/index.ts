@@ -548,7 +548,7 @@ export default {
     // /health stays open; OPTIONS preflight above already passed through.
     const isProtectedRoute =
       (request.method === 'POST' && (url.pathname === '/chat' || url.pathname === '/tts')) ||
-      (request.method === 'GET' && url.pathname === '/transcribe-token');
+      ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/transcribe-token');
     if (isProtectedRoute && !isAuthorized(request, env)) {
       return withCors(errorJson('unauthorized', 401), cors);
     }
@@ -561,7 +561,7 @@ export default {
         response = await handleChat(request, env);
       } else if (request.method === 'POST' && url.pathname === '/tts') {
         response = await handleTts(request, env);
-      } else if (request.method === 'GET' && url.pathname === '/transcribe-token') {
+      } else if ((request.method === 'GET' || request.method === 'POST') && url.pathname === '/transcribe-token') {
         response = await handleTranscribeToken(env);
       } else {
         response = errorJson('not found', 404);

@@ -198,9 +198,26 @@ class DjCamera {
     }
     rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    // Prefer 640x480 for low-latency BlazeFace inference; fall back to the
+    // sensor's default frame size if the driver rejects it.
+    MFSetAttributeSize(rgb.Get(), MF_MT_FRAME_SIZE, 640, 480);
+
     hr = reader_->SetCurrentMediaType(
         static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr,
         rgb.Get());
+    if (FAILED(hr)) {
+      rgb.Reset();
+      hr = MFCreateMediaType(&rgb);
+      if (FAILED(hr)) {
+        *error_out = "MFCreateMediaType failed";
+        return false;
+      }
+      rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+      rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+      hr = reader_->SetCurrentMediaType(
+          static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr,
+          rgb.Get());
+    }
     if (FAILED(hr)) {
       *error_out = "camera would not provide RGB32";
       return false;

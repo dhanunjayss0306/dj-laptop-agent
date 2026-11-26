@@ -1,5 +1,8 @@
 // Command Center (default page): StatusCards on top, chat list,
 // composer at the bottom. Renders every ChatResponse kind.
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
@@ -40,7 +43,11 @@ class _CommandPageState extends State<CommandPage> {
   final TextEditingController _composer = TextEditingController();
   final ScrollController _scroll = ScrollController();
   bool _busy = false;
+  bool _listening = false;
   late int _seenBuildVersion;
+  StreamSubscription<String>? _partialSub;
+  StreamSubscription<String>? _finalSub;
+  StreamSubscription<String>? _speechErrSub;
 
   @override
   void initState() {
@@ -48,14 +55,68 @@ class _CommandPageState extends State<CommandPage> {
     _seenBuildVersion = widget.app.indexBuiltVersion.value;
     widget.app.indexBuiltVersion.addListener(_onIndexBuilt);
     _composer.addListener(() => setState(() {}));
+    _partialSub = widget.app.voiceChannel.onPartialResult.listen((text) {
+      if (!mounted || !_listening) return;
+      _composer.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+      unawaited(widget.app.updateCompanion('listening', text));
+    });
+    _finalSub = widget.app.voiceChannel.onFinalResult.listen((text) {
+      if (!mounted || !_listening) return;
+      _listening = false;
+      final trimmed = text.trim();
+      setState(() {});
+      unawaited(widget.app.updateCompanion('idle'));
+      if (trimmed.isNotEmpty) {
+        _composer.text = trimmed;
+        _send();
+      }
+    });
+    _speechErrSub = widget.app.voiceChannel.onSpeechError.listen((err) {
+      if (!mounted || !_listening) return;
+      setState(() => _listening = false);
+      unawaited(widget.app.updateCompanion('idle'));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Voice input: $err')),
+      );
+    });
   }
 
   @override
   void dispose() {
+    _partialSub?.cancel();
+    _finalSub?.cancel();
+    _speechErrSub?.cancel();
     widget.app.indexBuiltVersion.removeListener(_onIndexBuilt);
     _composer.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleVoice() async {
+    if (_busy) return;
+    if (_listening) {
+      await widget.app.voiceChannel.stopListening();
+      if (!mounted) return;
+      setState(() => _listening = false);
+      await widget.app.updateCompanion('idle');
+      return;
+    }
+    setState(() => _listening = true);
+    await widget.app.updateCompanion('listening', 'Listening...');
+    final res = await widget.app.voiceChannel.startListening();
+    if (!mounted) return;
+    if (res['ok'] != true) {
+      setState(() => _listening = false);
+      await widget.app.updateCompanion('idle');
+      final msg =
+          (res['error'] ?? res['message'] ?? 'Voice unavailable').toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+    }
   }
 
   void _onIndexBuilt() {
@@ -180,6 +241,15 @@ class _CommandPageState extends State<CommandPage> {
                 ),
               ),
               const SizedBox(width: 8),
+              if (Platform.isAndroid) ...[
+                IconButton(
+                  tooltip: _listening ? 'Stop listening' : 'Speak command',
+                  icon: Icon(_listening ? Icons.mic_off : Icons.mic),
+                  color: _listening ? Theme.of(context).colorScheme.error : null,
+                  onPressed: _busy ? null : _toggleVoice,
+                ),
+                const SizedBox(width: 4),
+              ],
               ElevatedButton(
                 onPressed: (_busy || _composer.text.trim().isEmpty)
                     ? null

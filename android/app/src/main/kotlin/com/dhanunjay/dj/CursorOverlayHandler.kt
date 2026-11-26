@@ -94,6 +94,19 @@ class CursorOverlayHandler(private val activity: Activity) :
                     hideCursor()
                     result.success(mapOf("ok" to true, "message" to "cursor hidden"))
                 }
+                "setCompanionState" -> {
+                    val state = call.argument<String>("state") ?: "idle"
+                    val text = call.argument<String>("text") ?: ""
+                    if (state == "hidden") {
+                        hideCursor()
+                    } else if (cursorView != null) {
+                        cursorView?.setLabel(text)
+                    } else if (text.isNotEmpty()) {
+                        val metrics = activity.resources.displayMetrics
+                        showAt(metrics.widthPixels / 2, metrics.heightPixels / 3, text)
+                    }
+                    result.success(mapOf("ok" to true, "message" to "companion state updated"))
+                }
                 "annotate" -> {
                     val list = parseAnnotations(call)
                     annotate(list, result)

@@ -19,12 +19,13 @@ constexpr const wchar_t kOverlayClassName[] = L"DJ_FAKE_CURSOR_OVERLAY";
 // DJ blue #0071E3.
 constexpr COLORREF kDjBlue = RGB(0x00, 0x71, 0xE3);
 constexpr COLORREF kWhite = RGB(0xFF, 0xFF, 0xFF);
-// Cursor-only overlay window size; the marker is drawn inside it.
-// With annotations the window covers the whole virtual screen instead.
-constexpr int kOverlayWidth = 360;
-constexpr int kOverlayHeight = 96;
+// Cursor-only overlay window size; large enough for the cursor marker plus
+// multi-line live caption ("fake lyrics") bubbles.
+constexpr int kOverlayWidth = 440;
+constexpr int kOverlayHeight = 220;
 // Translucent highlight fill: alpha ~70/255 over DJ blue.
 constexpr uint32_t kHighlightFill = (70u << 24) | 0x000071E3u;
+constexpr COLORREF kCaptionBg = RGB(0x16, 0x16, 0x1A);
 
 void RegisterOverlayClass() {
   static bool registered = false;
@@ -39,11 +40,6 @@ void RegisterOverlayClass() {
   wc.hbrBackground = nullptr;
   ::RegisterClassW(&wc);
   registered = true;
-}
-
-// Ease-out cubic: fast start, gentle stop.
-double EaseOutCubic(double t) {
-  return 1.0 - std::pow(1.0 - t, 3.0);
 }
 
 // Reads an int field from an annotation map (Dart ints arrive as int32
@@ -78,6 +74,39 @@ bool GetMapString(const flutter::EncodableMap& map, const char* key,
   }
   *out = *value;
   return true;
+}
+
+// Multi-line rounded caption bubble (Clicky/lyrics style) at (x, y).
+void DrawCaptionCard(HDC dc, int x, int y, const std::wstring& text,
+                     int max_width, int font_px) {
+  if (text.empty()) return;
+  HFONT font = ::CreateFontW(font_px, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  const HGDIOBJ old_font = ::SelectObject(dc, font);
+  const int pad_x = 12;
+  const int pad_y = 8;
+  RECT calc_rect{0, 0, max_width - pad_x * 2, 0};
+  ::DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &calc_rect,
+              DT_CALCRECT | DT_WORDBREAK | DT_LEFT);
+  const int box_w = std::min(max_width, static_cast<int>(calc_rect.right) + pad_x * 2);
+  const int box_h = std::min(190, static_cast<int>(calc_rect.bottom) + pad_y * 2);
+  const HBRUSH bg_brush = ::CreateSolidBrush(kCaptionBg);
+  const HPEN border_pen = ::CreatePen(PS_SOLID, 1, kDjBlue);
+  const HGDIOBJ old_brush = ::SelectObject(dc, bg_brush);
+  const HGDIOBJ old_pen = ::SelectObject(dc, border_pen);
+  ::RoundRect(dc, x, y, x + box_w, y + box_h, 12, 12);
+  RECT text_rect{x + pad_x, y + pad_y, x + box_w - pad_x, y + box_h - pad_y};
+  ::SetTextColor(dc, kWhite);
+  ::DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &text_rect,
+              DT_WORDBREAK | DT_LEFT | DT_END_ELLIPSIS);
+  ::SelectObject(dc, old_pen);
+  ::SelectObject(dc, old_brush);
+  ::SelectObject(dc, old_font);
+  ::DeleteObject(font);
+  ::DeleteObject(bg_brush);
+  ::DeleteObject(border_pen);
 }
 
 // Small blue label bubble with white text at (x, y). Caller must have set
@@ -126,6 +155,7 @@ DjCursorChannel::~DjCursorChannel() {
   // the handler, and a late Dart call must not reach a dead object.
   channel_.SetMethodCallHandler(nullptr);
   StopAnimation();
+  StopPulseTimer();
   if (overlay_ != nullptr) {
     ::DestroyWindow(overlay_);
     overlay_ = nullptr;
@@ -139,6 +169,17 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
     auto* self = reinterpret_cast<DjCursorChannel*>(
         ::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (self != nullptr) {
+      if (wparam == kPulseTimerId) {
+        self->pulse_tick_ = (self->pulse_tick_ + 1) % 360;
+        if (self->visible_ &&
+            (self->companion_state_ == CompanionState::kListening ||
+             self->companion_state_ == CompanionState::kThinking)) {
+          self->DrawOverlay();
+        } else {
+          self->StopPulseTimer();
+        }
+        return 0;
+      }
       if (self->HasAnnotations()) {
         // Full-screen overlay: the window never moves; the marker is
         // redrawn inside it by DrawOverlay. Never slide the window.
@@ -146,17 +187,21 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
       } else {
         const DWORD now = ::GetTickCount();
         const DWORD elapsed = now - self->anim_start_;
-        const double t = std::min(
+        const double linear = std::min(
             1.0, static_cast<double>(elapsed) /
                      static_cast<double>(kAnimDurationMs));
-        const double eased = EaseOutCubic(t);
+        // Smoothstep easeInOut for Clicky-style Bezier arc flight.
+        const double t = linear * linear * (3.0 - 2.0 * linear);
+        const double omt = 1.0 - t;
         const int cur_x = static_cast<int>(
-            self->from_x_ + (self->x_ - self->from_x_) * eased);
+            omt * omt * self->from_x_ + 2.0 * omt * t * self->ctrl_x_ +
+            t * t * self->x_);
         const int cur_y = static_cast<int>(
-            self->from_y_ + (self->y_ - self->from_y_) * eased);
+            omt * omt * self->from_y_ + 2.0 * omt * t * self->ctrl_y_ +
+            t * t * self->y_);
         ::SetWindowPos(hwnd, HWND_TOPMOST, cur_x, cur_y, 0, 0,
                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-        if (t >= 1.0) {
+        if (linear >= 1.0) {
           self->StopAnimation();
         }
       }
@@ -369,25 +414,53 @@ void DjCursorChannel::DrawOverlay() {
   }
 
   if (visible_) {
-    // Triangle pointer, tip at the (x, y) passed by Dart, pointing
-    // up-left like a real cursor. Local tip == (x_, y_) minus the
-    // window origin.
     const int tip_x = x_ - origin_x;
     const int tip_y = y_ - origin_y;
-    POINT triangle[3] = {{tip_x, tip_y},
-                         {tip_x, tip_y + 24},
-                         {tip_x + 8, tip_y + 17}};
-    ::Polygon(mem_dc, triangle, 3);
-    // Inner white notch so the marker reads as a cursor, not a blob.
-    ::SelectObject(mem_dc, white_brush);
-    POINT notch[3] = {{tip_x + 3, tip_y + 4},
-                      {tip_x + 3, tip_y + 16},
-                      {tip_x + 7, tip_y + 13}};
-    ::Polygon(mem_dc, notch, 3);
-    ::SelectObject(mem_dc, blue_brush);
+    if (companion_state_ == CompanionState::kListening) {
+      // 5-bar animated blue waveform replacing the triangle while listening.
+      for (int i = 0; i < 5; ++i) {
+        const double phase =
+            static_cast<double>(pulse_tick_) * 0.25 + static_cast<double>(i) * 0.7;
+        const int bar_h = 6 + static_cast<int>((std::sin(phase) + 1.0) * 7.0);
+        const int bx = tip_x + i * 5;
+        const int by = tip_y + 12 - bar_h / 2;
+        ::RoundRect(mem_dc, bx, by, bx + 3, by + bar_h, 2, 2);
+      }
+    } else if (companion_state_ == CompanionState::kThinking) {
+      // Orbiting blue ring indicator while thinking/reading screen.
+      const HPEN ring_pen = ::CreatePen(PS_SOLID, 3, kDjBlue);
+      const HGDIOBJ prev_pen = ::SelectObject(mem_dc, ring_pen);
+      const HGDIOBJ prev_brush =
+          ::SelectObject(mem_dc, ::GetStockObject(NULL_BRUSH));
+      const double angle = static_cast<double>(pulse_tick_) * 0.2;
+      const int cx = tip_x + 10;
+      const int cy = tip_y + 10;
+      const int x_start = cx + static_cast<int>(9.0 * std::cos(angle));
+      const int y_start = cy + static_cast<int>(9.0 * std::sin(angle));
+      const int x_end = cx + static_cast<int>(9.0 * std::cos(angle + 3.8));
+      const int y_end = cy + static_cast<int>(9.0 * std::sin(angle + 3.8));
+      ::Arc(mem_dc, cx - 9, cy - 9, cx + 9, cy + 9, x_start, y_start, x_end,
+            y_end);
+      ::SelectObject(mem_dc, prev_brush);
+      ::SelectObject(mem_dc, prev_pen);
+      ::DeleteObject(ring_pen);
+    } else {
+      // Triangle pointer, tip at (x_, y_).
+      POINT triangle[3] = {{tip_x, tip_y},
+                           {tip_x, tip_y + 24},
+                           {tip_x + 8, tip_y + 17}};
+      ::Polygon(mem_dc, triangle, 3);
+      ::SelectObject(mem_dc, white_brush);
+      POINT notch[3] = {{tip_x + 3, tip_y + 4},
+                        {tip_x + 3, tip_y + 16},
+                        {tip_x + 7, tip_y + 13}};
+      ::Polygon(mem_dc, notch, 3);
+      ::SelectObject(mem_dc, blue_brush);
+    }
 
-    if (!label_.empty()) {
-      // Label bubble to the right of the pointer.
+    if (!caption_text_.empty()) {
+      DrawCaptionCard(mem_dc, tip_x + 28, tip_y + 4, caption_text_, 360, 16);
+    } else if (!label_.empty()) {
       DrawLabelBubble(mem_dc, tip_x + 20, tip_y, label_, 20);
     }
   }
@@ -429,6 +502,12 @@ void DjCursorChannel::StartAnimation(int to_x, int to_y) {
   from_y_ = y_;
   x_ = to_x;
   y_ = to_y;
+  const int dx = to_x - from_x_;
+  const int dy = to_y - from_y_;
+  const double dist = std::hypot(static_cast<double>(dx), static_cast<double>(dy));
+  const int arc_height = std::min(static_cast<int>(dist * 0.2), 80);
+  ctrl_x_ = (from_x_ + to_x) / 2;
+  ctrl_y_ = (from_y_ + to_y) / 2 - arc_height;
   anim_start_ = ::GetTickCount();
   animating_ = true;
   if (overlay_ != nullptr) {
@@ -441,6 +520,20 @@ void DjCursorChannel::StopAnimation() {
     ::KillTimer(overlay_, kAnimTimerId);
   }
   animating_ = false;
+}
+
+void DjCursorChannel::StartPulseTimer() {
+  if (!pulse_timer_active_ && overlay_ != nullptr) {
+    ::SetTimer(overlay_, kPulseTimerId, 45, nullptr);
+    pulse_timer_active_ = true;
+  }
+}
+
+void DjCursorChannel::StopPulseTimer() {
+  if (pulse_timer_active_ && overlay_ != nullptr) {
+    ::KillTimer(overlay_, kPulseTimerId);
+  }
+  pulse_timer_active_ = false;
 }
 
 void DjCursorChannel::HandleMethodCall(
@@ -503,13 +596,78 @@ void DjCursorChannel::HandleMethodCall(
 
   if (method == "hideCursor") {
     StopAnimation();
+    StopPulseTimer();
     visible_ = false;
+    companion_state_ = CompanionState::kHidden;
+    caption_text_.clear();
     // Annotations persist until clearAnnotations OR the cursor is hidden.
     annotations_.clear();
     if (overlay_ != nullptr) {
       RestoreCursorWindow();
       ::ShowWindow(overlay_, SW_HIDE);
     }
+    result->Success(Ok());
+    return;
+  }
+
+  if (method == "setCompanionState") {
+    std::string state;
+    if (!GetStringArg(call, "state", &state)) {
+      result->Success(Err("setCompanionState needs a 'state' string."));
+      return;
+    }
+    std::string text;
+    GetStringArg(call, "text", &text);
+    if (state == "hidden") {
+      StopAnimation();
+      StopPulseTimer();
+      visible_ = false;
+      companion_state_ = CompanionState::kHidden;
+      caption_text_.clear();
+      if (overlay_ != nullptr && !HasAnnotations()) {
+        ::ShowWindow(overlay_, SW_HIDE);
+      } else if (overlay_ != nullptr) {
+        DrawOverlay();
+      }
+      result->Success(Ok());
+      return;
+    }
+    if (state == "listening") {
+      companion_state_ = CompanionState::kListening;
+    } else if (state == "thinking") {
+      companion_state_ = CompanionState::kThinking;
+    } else if (state == "responding") {
+      companion_state_ = CompanionState::kResponding;
+    } else {
+      companion_state_ = CompanionState::kIdle;
+    }
+    caption_text_ = WideFromUtf8(text);
+    if (!visible_) {
+      POINT pt{};
+      if (::GetCursorPos(&pt)) {
+        x_ = pt.x + 24;
+        y_ = pt.y + 18;
+      }
+    }
+    EnsureWindow();
+    if (overlay_ == nullptr) {
+      result->Success(Err("Could not create the cursor overlay window."));
+      return;
+    }
+    if (!HasAnnotations()) {
+      RestoreCursorWindow();
+      ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, 0, 0,
+                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                         SWP_SHOWWINDOW);
+    }
+    visible_ = true;
+    if (companion_state_ == CompanionState::kListening ||
+        companion_state_ == CompanionState::kThinking) {
+      StartPulseTimer();
+    } else {
+      StopPulseTimer();
+    }
+    DrawOverlay();
     result->Success(Ok());
     return;
   }

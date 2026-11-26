@@ -1,103 +1,146 @@
-// ScreenQA flow — what happens on a hotkey press (Windows
-// Ctrl+Alt+D) or a floating-button tap (Android).
+// ScreenQA flow — what happens on a hotkey press (Windows Ctrl+Alt+D),
+// floating Dynamic Island tap (Android), or tapping the in-app Island.
 //
-// The screen is captured ONLY here, once per press, never
-// continuously. The user is asked what they want to know, the
-// screenshot + question go through the saved Cloud settings
-// (Worker URL + provider from dj_cloud.json), the plain-text answer
-// is shown, and ScreenQA moves the fake cursor to the first
-// [POINT:] tag. When no Worker URL is set or no model is up,
-// ScreenQA says so plainly and falls back to its Core-only path.
+// Captures the screen once per ask (never continuously), streams tokens
+// live ("fake lyrics") into the Dynamic Island pill and floating cursor
+// overlay, speaks the reply, and flies the fake cursor to each [POINT:].
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../core/worker_client.dart';
 import 'app_state.dart';
 
-/// Ask what the user wants to know about the screen. Null when the
-/// user cancels or asks nothing.
-Future<String?> _askQuestion(BuildContext context) async {
+/// Ask what the user wants to know about the screen (typed or spoken on
+/// Android). Returns null when cancelled.
+Future<String?> _askQuestion(BuildContext context, DjAppState app) async {
   final controller = TextEditingController();
+  StreamSubscription<String>? partialSub;
+  StreamSubscription<String>? finalSub;
+  var listening = false;
   final answer = await showDialog<String>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Ask about your screen'),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(
-          hintText: 'What do you want to know?',
-        ),
-        onSubmitted: (_) =>
-            Navigator.of(context).pop(controller.text.trim()),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () =>
-              Navigator.of(context).pop(controller.text.trim()),
-          child: const Text('Ask'),
-        ),
-      ],
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        Future<void> toggleMic() async {
+          if (listening) {
+            await app.voiceChannel.stopListening();
+            setDialogState(() => listening = false);
+            return;
+          }
+          partialSub ??= app.voiceChannel.onPartialResult.listen((t) {
+            if (t.isNotEmpty) {
+              controller.text = t;
+              app.updateCompanion('listening', t);
+            }
+          });
+          finalSub ??= app.voiceChannel.onFinalResult.listen((t) {
+            setDialogState(() => listening = false);
+            if (t.trim().isNotEmpty && dialogContext.mounted) {
+              Navigator.of(dialogContext).pop(t.trim());
+            }
+          });
+          setDialogState(() => listening = true);
+          app.updateCompanion('listening', 'Listening...');
+          final res = await app.voiceChannel.startListening();
+          if (res['ok'] != true && dialogContext.mounted) {
+            setDialogState(() => listening = false);
+            app.updateCompanion('idle');
+          }
+        }
+
+        return AlertDialog(
+          title: const Text('Ask DJ about your screen'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: listening
+                  ? 'Listening...'
+                  : 'What do you want to know?',
+              suffixIcon: Platform.isAndroid
+                  ? IconButton(
+                      icon: Icon(listening ? Icons.mic_off : Icons.mic),
+                      onPressed: toggleMic,
+                    )
+                  : null,
+            ),
+            onSubmitted: (_) =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: const Text('Ask'),
+            ),
+          ],
+        );
+      },
     ),
   );
+  await partialSub?.cancel();
+  await finalSub?.cancel();
+  if (listening) {
+    await app.voiceChannel.stopListening();
+  }
   controller.dispose();
-  if (answer == null || answer.trim().isEmpty) return null;
+  if (answer == null || answer.trim().isEmpty) {
+    await app.updateCompanion('idle');
+    return null;
+  }
   return answer.trim();
 }
 
-/// Run one ScreenQA round: question dialog, capture once, answer
-/// dialog. Safe to call from a hotkey listener; it does nothing when
-/// the user cancels.
+/// Run one ScreenQA round with live "fake lyrics" captions and cursor
+/// pointing (no blocking answer modal).
 Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
-  final question = await _askQuestion(context);
+  final question = await _askQuestion(context, app);
   if (question == null) return;
-  if (!context.mounted) return;
 
-  showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) => const AlertDialog(
-      content: Row(
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(width: 16),
-          Expanded(child: Text('Looking at your screen...')),
-        ],
-      ),
-    ),
-  );
+  var cancelled = false;
+  final cancelSub = app.hotkeyChannel.onCancelPressed.listen((_) {
+    cancelled = true;
+    app.voiceChannel.stopSpeak();
+    app.cursorChannel.hideCursor();
+    app.updateCompanion('idle');
+  });
 
   final client = app.buildWorkerClient();
   final qa = app.buildScreenQAForClient(client);
-  final answer = await qa.ask(question).whenComplete(() => client?.close());
-
-  if (!context.mounted) return;
-  Navigator.of(context, rootNavigator: true).pop();
-
-  final lines = <String>[answer.text];
-  if (answer.points.isNotEmpty) {
-    final first = answer.points.first;
-    lines.add(
-      'Pointed at: ${first.label.isEmpty ? 'here' : first.label} '
-      '(${first.x}, ${first.y}).',
+  try {
+    final answer = await qa.askStreaming(
+      question,
+      speakAnswer: true,
+      history: List<ChatMessage>.from(app.screenQaHistory),
+      onCompanionUpdate: (state, text) => app.updateCompanion(state, text),
+      isCancelled: () => cancelled,
     );
+    if (cancelled) return;
+
+    if (answer.modelUsed && answer.text.isNotEmpty) {
+      app.screenQaHistory
+        ..add(ChatMessage(role: 'user', content: question))
+        ..add(ChatMessage(role: 'assistant', content: answer.text));
+      if (app.screenQaHistory.length > 20) {
+        app.screenQaHistory.removeRange(0, app.screenQaHistory.length - 20);
+      }
+    }
+
+    await app.updateCompanion('responding', answer.text);
+    // Keep captions visible briefly ("fake lyrics" fade-out), then return to idle.
+    await Future<void>.delayed(const Duration(seconds: 6));
+    if (!cancelled) {
+      await app.updateCompanion('idle');
+      await app.cursorChannel.hideCursor();
+    }
+  } finally {
+    await cancelSub.cancel();
+    client?.close();
   }
-  if (!context.mounted) return;
-  await showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Screen answer'),
-      content: SingleChildScrollView(
-        child: Text(lines.join('\n\n')),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
-        ),
-      ],
-    ),
-  );
 }

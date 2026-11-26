@@ -110,7 +110,10 @@ class DjAppState {
     voiceChannel = VoiceChannel();
     inputChannel = InputChannel();
     appLauncher = AppLauncher(systemOps);
-    agentMode = AgentMode(tools: _agentTools());
+    agentMode = AgentMode(
+      tools: _agentTools(),
+      planner: _buildAgentPlanner,
+    );
     routines = RoutineStore(
       dataDir: dataDir,
       systemOps: systemOps,
@@ -190,6 +193,28 @@ class DjAppState {
   final ValueNotifier<UpdateState> updateState = ValueNotifier<UpdateState>(
     const UpdateState(status: 'idle', message: ''),
   );
+
+  /// Live companion overlay state ('idle', 'listening', 'thinking',
+  /// 'responding') and caption text ("fake lyrics") shared between the
+  /// in-app Dynamic Island pill, Android native pill, and Windows cursor.
+  final ValueNotifier<({String state, String text})> companionState =
+      ValueNotifier<({String state, String text})>(
+    (state: 'idle', text: ''),
+  );
+
+  /// Rolling ScreenQA turns (last 10 messages) so follow-ups have context.
+  final List<ChatMessage> screenQaHistory = <ChatMessage>[];
+
+  /// Update the companion overlay across Dart UI, Windows cursor, and
+  /// Android Dynamic Island simultaneously.
+  Future<void> updateCompanion(String state, [String text = '']) async {
+    companionState.value = (state: state, text: text);
+    final nativeState = state == 'idle' ? 'hidden' : state;
+    await Future.wait([
+      cursorChannel.setCompanionState(nativeState, text),
+      floatingButtonChannel.setIslandState(state, text),
+    ]);
+  }
 
   /// Text of the last finished index build, for the chat to post.
   String? lastIndexBuiltText;
@@ -421,8 +446,74 @@ class DjAppState {
         provider: providerFor(cloud.provider),
         model: visionModelFor(cloud.provider),
       ),
+      visionStreamChat: makeWorkerVisionStreamChat(
+        client,
+        provider: providerFor(cloud.provider),
+        model: visionModelFor(cloud.provider),
+      ),
       modelUp: () => true,
     );
+  }
+
+  /// Vision/Cloud planner for AgentMode: captures the current screen when
+  /// a Worker URL is configured and asks the cloud model for a JSON step
+  /// list; falls back to Core rules when no cloud Worker is configured.
+  Future<List<AgentPlanStep>> _buildAgentPlanner(String task) async {
+    final client = buildWorkerClient();
+    if (client == null) {
+      return AgentMode.planWithCoreRules(task);
+    }
+    try {
+      final cloud = loadCloudSettings();
+      final capture = await screenChannel.captureScreen();
+      final prompt =
+          'Plan steps to complete: "$task". '
+          'Reply ONLY with a JSON array of objects '
+          '[{"tool":"search|openFile|openApp|point|click|type","input":"...","description":"..."}]. '
+          'For click/point, input must be "x,y" in screen pixels.';
+      final msg = capture == null
+          ? ChatMessage(role: 'user', content: prompt)
+          : ChatMessage(
+              role: 'user',
+              content:
+                  '[screen ${capture.width}x${capture.height}] $prompt',
+              imageBase64: base64Encode(capture.png),
+            );
+      final raw = await client
+          .chat(
+            provider: providerFor(cloud.provider),
+            model: effectiveCloudModel(cloud),
+            messages: [msg],
+          )
+          .join();
+      final match = RegExp(r'\[[\s\S]*\]').firstMatch(raw);
+      if (match != null) {
+        final decoded = jsonDecode(match.group(0)!);
+        if (decoded is List) {
+          final steps = <AgentPlanStep>[];
+          for (final item in decoded) {
+            if (item is Map<String, dynamic>) {
+              final tool = item['tool']?.toString() ?? '';
+              final input = item['input']?.toString() ?? '';
+              final desc = item['description']?.toString() ?? tool;
+              if (tool.isNotEmpty) {
+                steps.add(AgentPlanStep(
+                  tool: tool,
+                  input: input,
+                  description: desc,
+                ));
+              }
+            }
+          }
+          if (steps.isNotEmpty) return steps;
+        }
+      }
+    } catch (_) {
+      // Fall through to Core rules when cloud planning fails.
+    } finally {
+      client.close();
+    }
+    return AgentMode.planWithCoreRules(task);
   }
 
   // -- Hotkey (Windows) + floating button (Android) --------------------

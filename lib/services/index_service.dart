@@ -33,8 +33,9 @@ const Set<String> readableExtsIndex = {
 
 const Set<String> skipDirsIndex = {
   'appdata', '.git', 'node_modules', '__pycache__', '.venv', 'venv',
-  '.cache', '.antigravity', 'dj_data', '\$recycle.bin',
-  'system volume information',
+  '.cache', '.antigravity', '.dart_tool', '.pub-cache', '.gradle',
+  'dj_data', '\$recycle.bin', 'system volume information',
+  'onedrivetemp', 'programdata', 'windows',
 };
 
 const int maxFileMbIndex = 20;
@@ -430,7 +431,7 @@ class IndexService {
         onFile(entry.path, size, mtimeMs);
       }
       visited += 1;
-      if (visited % 200 == 0) {
+      if (visited % 50 == 0) {
         await Future<void>.delayed(Duration.zero);
       }
     }

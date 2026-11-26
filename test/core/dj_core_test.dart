@@ -481,14 +481,23 @@ void main() {
         expect(repo.load().folders.length, 5);
         File(repo.configPath).writeAsStringSync('{not json');
         expect(repo.load().folders.length, 5);
-        final cfg = AppConfig(folders: [
-          FolderEntry(path: '${tmp.path}/Docs', enabled: true),
-          FolderEntry(path: '${tmp.path}/Off', enabled: false),
-        ], startAtLogin: true);
+        final cfg = AppConfig(
+          folders: [
+            FolderEntry(path: '${tmp.path}/Docs', enabled: true),
+            FolderEntry(path: '${tmp.path}/Off', enabled: false),
+          ],
+          startAtLogin: true,
+          privacySensitivity: 0.42,
+          privacyDetectShoulderSurfers: false,
+          privacyStartOnLaunch: true,
+        );
         repo.save(cfg);
         final loaded = repo.load();
         expect(loaded.folders.length, 2);
         expect(loaded.startAtLogin, isTrue);
+        expect(loaded.privacySensitivity, 0.42);
+        expect(loaded.privacyDetectShoulderSurfers, isFalse);
+        expect(loaded.privacyStartOnLaunch, isTrue);
         expect(File(repo.configPath).readAsStringSync(), contains('\n  "folders"'));
         expect(enabledFolders(loaded), isEmpty); // neither dir exists
         Directory('${tmp.path}/Docs').createSync();

@@ -55,6 +55,15 @@ class FloatingButtonChannel {
     });
   }
 
+  /// Updates the Android Dynamic Island pill state ('idle', 'listening',
+  /// 'thinking', 'responding') and live caption text. No-op on Windows.
+  Future<bool> setIslandState(String state, [String text = '']) async {
+    return _invoke('setIslandState', <String, dynamic>{
+      'state': state,
+      'text': text,
+    });
+  }
+
   Future<bool> _invoke(String method, [Map<String, dynamic>? args]) async {
     try {
       final Map<dynamic, dynamic>? result = await _channel

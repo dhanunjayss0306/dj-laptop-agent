@@ -20,8 +20,9 @@ import 'system_ops.dart';
 const int maxDupMb = 500;
 const Set<String> skipDirs = {
   'appdata', '.git', 'node_modules', '__pycache__', '.venv', 'venv',
-  '.cache', '.antigravity', 'dj_data', '\$recycle.bin',
-  'system volume information',
+  '.cache', '.antigravity', '.dart_tool', '.pub-cache', '.gradle',
+  'dj_data', '\$recycle.bin', 'system volume information',
+  'onedrivetemp', 'programdata', 'windows',
 };
 
 class DuplicateService {
@@ -111,6 +112,7 @@ class DuplicateService {
     } catch (_) {
       return;
     }
+    var visited = 0;
     for (final entry in entries) {
       final name = entry.path.split(Platform.pathSeparator).last;
       if (entry is Directory) {
@@ -123,6 +125,10 @@ class DuplicateService {
         if (organizerSkip.contains(name.toLowerCase())) continue;
         onFile(entry.path);
         if (++_sinceYield >= 256) await _yieldToEventLoop();
+      }
+      visited += 1;
+      if (visited % 50 == 0) {
+        await Future<void>.delayed(Duration.zero);
       }
     }
   }

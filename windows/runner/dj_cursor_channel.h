@@ -66,6 +66,9 @@ class DjCursorChannel {
     std::wstring text;  // text label
   };
 
+  // Companion visual state for Fake DJ + live caption bubble.
+  enum class CompanionState { kHidden, kIdle, kListening, kThinking, kResponding };
+
   void HandleMethodCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
@@ -88,6 +91,8 @@ class DjCursorChannel {
   void ApplyHighlightFills(uint32_t* pixels);
   void StartAnimation(int to_x, int to_y);
   void StopAnimation();
+  void StartPulseTimer();
+  void StopPulseTimer();
   bool HasAnnotations() const { return !annotations_.empty(); }
 
   flutter::MethodChannel<flutter::EncodableValue> channel_;
@@ -96,18 +101,25 @@ class DjCursorChannel {
   int x_ = 0;
   int y_ = 0;
   std::wstring label_;
+  CompanionState companion_state_ = CompanionState::kHidden;
+  std::wstring caption_text_;
+  int pulse_tick_ = 0;
+  bool pulse_timer_active_ = false;
   // Current overlay size. Cursor-only: kOverlayWidth x kOverlayHeight.
   // With annotations: the whole virtual screen.
   int overlay_w_ = 0;
   int overlay_h_ = 0;
   std::vector<Annotation> annotations_;
-  // Animation state: slide from (from_x_, from_y_) to (x_, y_) over 300 ms.
+  // Animation state: Bezier arc slide from (from_x_, from_y_) to (x_, y_).
   bool animating_ = false;
   int from_x_ = 0;
   int from_y_ = 0;
+  int ctrl_x_ = 0;
+  int ctrl_y_ = 0;
   DWORD anim_start_ = 0;
   static constexpr UINT_PTR kAnimTimerId = 1;
-  static constexpr DWORD kAnimDurationMs = 300;
+  static constexpr UINT_PTR kPulseTimerId = 2;
+  static constexpr DWORD kAnimDurationMs = 420;
 };
 
 }  // namespace dj

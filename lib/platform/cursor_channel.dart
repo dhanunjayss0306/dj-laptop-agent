@@ -47,6 +47,16 @@ class CursorChannel {
     });
   }
 
+  /// Updates the companion state ('idle', 'listening', 'thinking',
+  /// 'responding', 'hidden') and optional live caption text ("fake lyrics")
+  /// rendered next to the fake cursor. Throws nothing.
+  Future<bool> setCompanionState(String state, [String text = '']) async {
+    return _invoke('setCompanionState', <String, dynamic>{
+      'state': state,
+      'text': text,
+    });
+  }
+
   /// Hides the fake cursor. Also clears any annotations (they persist
   /// until [clearAnnotations] or this call). Always returns true unless
   /// the channel itself fails. Throws nothing.

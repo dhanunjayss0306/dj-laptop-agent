@@ -31,10 +31,16 @@ import '../platform/voice_channel.dart';
 
 /// One point the model named, in virtual-screen pixels.
 class ScreenPoint {
-  const ScreenPoint({required this.x, required this.y, required this.label});
+  const ScreenPoint({
+    required this.x,
+    required this.y,
+    required this.label,
+    this.screen,
+  });
   final int x;
   final int y;
   final String label;
+  final int? screen;
 }
 
 /// What ScreenQA answered, and how it got there.
@@ -57,9 +63,6 @@ class ScreenAnswer {
 
 /// A vision call: PNG bytes + question in, plain answer text out.
 /// The answer may carry [POINT:x,y:label] tags; ScreenQA parses them.
-///
-/// Plug this in once the Worker gains a vision endpoint. Until then
-/// pass null and ScreenQA uses the Core-only fallback.
 typedef VisionChat = Future<String> Function({
   required Uint8List png,
   required String question,
@@ -67,15 +70,48 @@ typedef VisionChat = Future<String> Function({
   required int height,
 });
 
+/// Streaming vision call yielding text deltas as they arrive.
+typedef VisionStreamChat = Stream<String> Function({
+  required Uint8List png,
+  required String question,
+  required int width,
+  required int height,
+  List<ChatMessage> history,
+});
+
+const String _screenSystemPrompt =
+    'You are DJ, a friendly screen buddy. Answer concisely in natural '
+    'spoken sentences (no markdown or bullet lists). '
+    'When pointing would help, add [POINT:x,y:label] in screenshot pixels '
+    '(origin top-left). For multiple steps, put one [POINT:x,y:label] tag '
+    'before each target instruction.';
+
 /// A [VisionChat] backed by the Cloudflare Worker: sends the PNG
 /// screenshot plus the question to [model] on [provider] and joins
-/// the streamed reply into one string. The model must be
-/// vision-capable; a text-only model rejects the image and the error
-/// surfaces plainly (ScreenQA reports it, never fakes an answer).
-///
-/// The screenshot bytes are base64-encoded in memory only and are
-/// never written to disk.
+/// the streamed reply into one string.
 VisionChat makeWorkerVisionChat(
+  WorkerClient client, {
+  required CloudProvider provider,
+  required String model,
+}) {
+  final streamFn = makeWorkerVisionStreamChat(
+    client,
+    provider: provider,
+    model: model,
+  );
+  return ({
+    required Uint8List png,
+    required String question,
+    required int width,
+    required int height,
+  }) =>
+      streamFn(png: png, question: question, width: width, height: height)
+          .join();
+}
+
+/// Streaming version of [makeWorkerVisionChat] for live "fake lyrics"
+/// captions next to the cursor / in the Dynamic Island.
+VisionStreamChat makeWorkerVisionStreamChat(
   WorkerClient client, {
   required CloudProvider provider,
   required String model,
@@ -85,50 +121,48 @@ VisionChat makeWorkerVisionChat(
     required String question,
     required int width,
     required int height,
-  }) async {
-    final chunks = await client
-        .chat(
-          provider: provider,
-          model: model,
-          messages: [
-            const ChatMessage(
-              role: 'system',
-              content:
-                  'You are DJ, a screen assistant. Answer about the screenshot. '
-                  'When the user asks where to click, name the element and add a '
-                  '[POINT:x,y:label] tag with its position in screenshot pixels.',
-            ),
-            ChatMessage(
-              role: 'user',
-              content: question,
-              imageBase64: base64Encode(png),
-              imageMimeType: 'image/png',
-            ),
-          ],
-        )
-        .toList();
-    return chunks.join();
+    List<ChatMessage> history = const [],
+  }) {
+    return client.chat(
+      provider: provider,
+      model: model,
+      messages: [
+        const ChatMessage(role: 'system', content: _screenSystemPrompt),
+        ...history,
+        ChatMessage(
+          role: 'user',
+          content: '[screen ${width}x$height] $question',
+          imageBase64: base64Encode(png),
+          imageMimeType: 'image/png',
+        ),
+      ],
+    );
   };
 }
 
-/// Parses `[POINT:x,y:label]` tags out of a model reply. The label is
-/// optional — `[POINT:120,300]` parses with an empty label.
+/// Parses `[POINT:x,y:label]` or `[POINT:x,y:label:screenN]` tags out of
+/// a model reply. The label is optional.
 List<ScreenPoint> parsePoints(String text) {
-  final matches = RegExp(r'\[POINT:(\d+),(\d+)(?::([^\]]+))?\]')
-      .allMatches(text)
-      .toList();
+  final matches = RegExp(
+    r'\[POINT:(\d+),(\d+)(?::([^\]:\]]+))?(?::screen(\d+))?\]',
+  ).allMatches(text);
   return matches
       .map((m) => ScreenPoint(
             x: int.parse(m.group(1)!),
             y: int.parse(m.group(2)!),
             label: (m.group(3) ?? '').trim(),
+            screen: m.group(4) == null ? null : int.tryParse(m.group(4)!),
           ))
       .toList();
 }
 
-/// The reply with its [POINT:...] tags stripped out, for speaking/showing.
-String stripPointTags(String text) =>
-    text.replaceAll(RegExp(r'\[POINT:\d+,\d+(?::[^\]]+)?\]'), '').trim();
+/// The reply with its `[POINT:...]` tags stripped out, for speaking/showing.
+String stripPointTags(String text) => text
+    .replaceAll(
+      RegExp(r'\[POINT:(?:none|\d+,\d+(?::[^\]:\]]+)?(?::screen\d+)?)\]'),
+      '',
+    )
+    .trim();
 
 class ScreenQA {
   ScreenQA({
@@ -136,6 +170,7 @@ class ScreenQA {
     required CursorChannel cursor,
     required VoiceChannel voice,
     this.visionChat,
+    this.visionStreamChat,
     this.modelUp,
   })  : _screen = screen,
         _cursor = cursor,
@@ -147,6 +182,9 @@ class ScreenQA {
 
   /// The vision function, or null when no vision endpoint exists.
   final VisionChat? visionChat;
+
+  /// Optional streaming vision function for live captions ("fake lyrics").
+  final VisionStreamChat? visionStreamChat;
 
   /// True when a model is up (Cloud or Local layer). Null/unset means
   /// "unknown" and is treated as no model — Core-only fallback.
@@ -218,6 +256,97 @@ class ScreenQA {
       );
     } finally {
       // Drop the screenshot bytes right after the answer.
+      png = null;
+    }
+  }
+
+  /// Streaming ScreenQA: streams tokens live into [onCaption] ("fake lyrics")
+  /// and flies the fake cursor sequentially through every `[POINT:...]` tag.
+  Future<ScreenAnswer> askStreaming(
+    String question, {
+    bool speakAnswer = false,
+    List<ChatMessage> history = const [],
+    void Function(String state, String text)? onCompanionUpdate,
+    bool Function()? isCancelled,
+  }) async {
+    if (visionStreamChat == null) {
+      return ask(question, speakAnswer: speakAnswer);
+    }
+    onCompanionUpdate?.call('thinking', 'Reading your screen...');
+    final capture = await _screen.captureScreen();
+    if (capture == null) {
+      return const ScreenAnswer(
+        text: 'I could not capture the screen just now. Try again in a moment.',
+        points: [],
+        modelUsed: false,
+        fallbackUsed: true,
+      );
+    }
+    Uint8List? png = capture.png;
+    try {
+      final hasModel = modelUp?.call() ?? false;
+      if (!hasModel) {
+        return const ScreenAnswer(
+          text: 'No model is running right now, so I cannot see your screen.',
+          points: [],
+          modelUsed: false,
+          fallbackUsed: true,
+        );
+      }
+      onCompanionUpdate?.call('thinking', 'Thinking...');
+      final buffer = StringBuffer();
+      await for (final delta in visionStreamChat!(
+        png: png,
+        question: question,
+        width: capture.width,
+        height: capture.height,
+        history: history,
+      )) {
+        if (isCancelled?.call() == true) break;
+        buffer.write(delta);
+        final clean = stripPointTags(buffer.toString());
+        if (clean.isNotEmpty) {
+          onCompanionUpdate?.call('responding', clean);
+        }
+      }
+      if (isCancelled?.call() == true) {
+        return const ScreenAnswer(
+          text: 'Cancelled.',
+          points: [],
+          modelUsed: false,
+          fallbackUsed: true,
+        );
+      }
+      final full = buffer.toString();
+      final points = parsePoints(full);
+      final text = stripPointTags(full);
+      if (speakAnswer && text.isNotEmpty) {
+        await _voice.speak(text);
+      }
+      for (var i = 0; i < points.length; i++) {
+        if (isCancelled?.call() == true) break;
+        final pt = points[i];
+        if (i == 0) {
+          await _cursor.showCursor(pt.x, pt.y, pt.label);
+        } else {
+          await _cursor.moveCursor(pt.x, pt.y, pt.label);
+          await Future<void>.delayed(const Duration(milliseconds: 900));
+        }
+      }
+      return ScreenAnswer(
+        text: text,
+        points: points,
+        modelUsed: true,
+        fallbackUsed: false,
+      );
+    } catch (e) {
+      return ScreenAnswer(
+        text: 'Something went wrong while looking at the screen: $e',
+        points: const [],
+        modelUsed: false,
+        fallbackUsed: true,
+      );
+    } finally {
       png = null;
     }
   }

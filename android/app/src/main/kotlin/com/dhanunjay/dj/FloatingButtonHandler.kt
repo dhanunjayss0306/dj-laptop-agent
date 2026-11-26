@@ -1,20 +1,24 @@
 package com.dhanunjay.dj
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Application
 import android.content.Context
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.widget.LinearLayout
+import android.widget.TextView
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -24,39 +28,11 @@ import kotlin.math.max
 /**
  * Channel: com.dhanunjay.dj/floatingbutton
  *
- * Floating DJ button — Android has no global hotkey, so this is the
- * Android equivalent: a small draggable blue circle with "DJ" text that
- * floats over other apps. Tapping it fires 'onHotkeyPressed' on the
- * HOTKEY channel (com.dhanunjay.dj/hotkey) — the same event the Windows
- * global hotkey feeds — so the Dart [HotkeyChannel.onHotkeyPressed] stream
- * just works, with no extra Dart wiring.
- *
- * Methods (this channel only manages visibility):
- * - showFloatingButton()            Show the button (see foreground rule).
- * - hideFloatingButton()            Hide it.
- * - setFloatingButtonVisible(bool)  Show/hide by flag.
- *
- * The button uses the SAME overlay window mechanism as the cursor overlay
- * (CursorOverlayHandler): a TYPE_APPLICATION_OVERLAY window, needing
- * "Display over other apps" (SYSTEM_ALERT_WINDOW). Without it every call
- * returns {ok: false, message: 'overlay permission not granted — allow
- * "Display over other apps" in Settings'}.
- *
- * Touch behaviour: the window is only as big as the button itself
- * (WRAP_CONTENT, ~56 dp), so touches anywhere else on screen pass
- * through to the app underneath — the button never blocks other touches.
- * Touch-drag moves it; a tap (down + up with < 10 dp of movement) fires
- * the hotkey event. The position is clamped to the screen.
- *
- * Foreground rule (implemented): the button is hidden while DJ's own app
- * is in the foreground — there is no point showing it over DJ itself.
- * Dart calls showFloatingButton() once (e.g. at startup); the handler
- * remembers the request and shows the button automatically whenever DJ
- * goes to the background, and hides it again when DJ comes back.
- * Tracked with Application.ActivityLifecycleCallbacks, so it works no
- * matter which DJ activity is on top.
- *
- * DJ blue: #0071E3.
+ * iOS-style Dynamic Island pill for Android: floats near the top cutout
+ * over other apps. Tapping it fires 'onHotkeyPressed' on the hotkey
+ * channel; calling setIslandState(state, text) expands it smoothly to
+ * display live listening transcripts, thinking status, or streaming "fake
+ * lyrics" captions with an '✕' cancel button ('onCancelPressed').
  */
 class FloatingButtonHandler(
     private val activity: Activity,
@@ -65,9 +41,13 @@ class FloatingButtonHandler(
 
     companion object {
         private const val DJ_BLUE = "#0071E3"
-        private const val BUTTON_SIZE_DP = 56f
+        private const val IDLE_WIDTH_DP = 112f
+        private const val IDLE_HEIGHT_DP = 36f
+        private const val ACTIVE_WIDTH_DP = 310f
+        private const val RESPONDING_HEIGHT_DP = 96f
+        private const val ACTIVE_HEIGHT_DP = 48f
         private const val TAP_SLOP_DP = 10f
-        private const val EDGE_MARGIN_DP = 16f
+        private const val TOP_MARGIN_DP = 10f
         private const val OVERLAY_NOT_GRANTED =
             "overlay permission not granted — allow \"Display over other apps\" in Settings"
     }
@@ -79,10 +59,17 @@ class FloatingButtonHandler(
         activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val density = activity.resources.displayMetrics.density
 
-    private var buttonView: View? = null
+    private var islandView: LinearLayout? = null
+    private var dotView: View? = null
+    private var labelView: TextView? = null
+    private var cancelView: TextView? = null
     private var params: WindowManager.LayoutParams? = null
+    private var sizeAnimator: ValueAnimator? = null
 
-    /** What Dart last asked for. The button only actually shows while DJ is backgrounded. */
+    private var islandState = "idle"
+    private var islandText = ""
+
+    /** What Dart last asked for. The pill only shows while DJ is backgrounded. */
     private var requestedVisible = false
 
     /** Number of DJ activities currently resumed (0 = DJ is in the background). */
@@ -148,6 +135,14 @@ class FloatingButtonHandler(
                         result.success(mapOf("ok" to true, "message" to "floating button shown"))
                     }
                 }
+                "setIslandState" -> {
+                    val state = call.argument<String>("state") ?: "idle"
+                    val text = call.argument<String>("text") ?: ""
+                    islandState = state
+                    islandText = text
+                    applyIslandState()
+                    result.success(mapOf("ok" to true, "message" to "island updated"))
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -162,14 +157,11 @@ class FloatingButtonHandler(
             true
         }
 
-    /**
-     * Adds the button if DJ is backgrounded and it was requested, removes
-     * it otherwise. Called on every show/hide request and on every
-     * foreground/background transition.
-     */
+    private fun dp(value: Float): Int = (value * density).toInt()
+
     private fun updateVisibility() {
         if (requestedVisible && resumedActivities == 0) {
-            if (buttonView == null && overlayGranted()) {
+            if (islandView == null && overlayGranted()) {
                 addButton()
             }
         } else {
@@ -178,37 +170,145 @@ class FloatingButtonHandler(
     }
 
     private fun addButton() {
-        val view = FloatingButtonView(activity)
-        view.setOnTouchListener(makeTouchListener())
+        val pill = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(24f).toFloat()
+                setColor(Color.parseColor("#111114"))
+                setStroke(dp(1.2f), Color.parseColor(DJ_BLUE))
+            }
+        }
+
+        val dot = View(activity).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor(DJ_BLUE))
+            }
+        }
+        val dotLp = LinearLayout.LayoutParams(dp(9f), dp(9f)).apply {
+            marginEnd = dp(8f)
+        }
+        pill.addView(dot, dotLp)
+
+        val label = TextView(activity).apply {
+            text = "DJ"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 3
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val labelLp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        pill.addView(label, labelLp)
+
+        val cancel = TextView(activity).apply {
+            text = "✕"
+            setTextColor(Color.parseColor("#B0B0B8"))
+            textSize = 13f
+            setPadding(dp(8f), dp(2f), dp(2f), dp(2f))
+            visibility = View.GONE
+            setOnClickListener {
+                try {
+                    hotkeyChannel.invokeMethod("onCancelPressed", null)
+                } catch (_: Exception) {}
+            }
+        }
+        pill.addView(cancel)
+
+        pill.setOnTouchListener(makeTouchListener())
+
         val metrics = activity.resources.displayMetrics
-        val sizePx = (BUTTON_SIZE_DP * density).toInt()
-        val marginPx = (EDGE_MARGIN_DP * density).toInt()
+        val initW = dp(IDLE_WIDTH_DP)
+        val initH = dp(IDLE_HEIGHT_DP)
         val layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            initW,
+            initH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // TouchABLE on purpose (its own small area only) but never
-            // focusable, so it cannot steal the keyboard or focus.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Default spot: right edge, about a third down the screen.
-            x = metrics.widthPixels - sizePx - marginPx
-            y = metrics.heightPixels / 3
+            x = (metrics.widthPixels - initW) / 2
+            y = dp(TOP_MARGIN_DP)
         }
         try {
-            windowManager.addView(view, layoutParams)
-            buttonView = view
+            windowManager.addView(pill, layoutParams)
+            islandView = pill
+            dotView = dot
+            labelView = label
+            cancelView = cancel
             params = layoutParams
+            applyIslandState()
         } catch (_: Exception) {
-            // Overlay permission revoked between the check and the add.
+            // Overlay permission revoked between check and add.
+        }
+    }
+
+    private fun applyIslandState() {
+        val pill = islandView ?: return
+        val label = labelView ?: return
+        val dot = dotView ?: return
+        val cancel = cancelView ?: return
+        val layoutParams = params ?: return
+
+        val isIdle = islandState == "idle" || islandState == "hidden"
+        val dotColor = when (islandState) {
+            "listening" -> "#22C55E"
+            "thinking" -> "#A78BFA"
+            "responding" -> DJ_BLUE
+            else -> DJ_BLUE
+        }
+        (dot.background as? GradientDrawable)?.setColor(Color.parseColor(dotColor))
+        cancel.visibility = if (isIdle) View.GONE else View.VISIBLE
+
+        label.text = when {
+            islandText.isNotBlank() -> islandText
+            islandState == "listening" -> "Listening..."
+            islandState == "thinking" -> "Thinking..."
+            islandState == "responding" -> "DJ"
+            else -> "DJ"
+        }
+
+        val targetW = dp(if (isIdle) IDLE_WIDTH_DP else ACTIVE_WIDTH_DP)
+        val targetH = dp(
+            when {
+                isIdle -> IDLE_HEIGHT_DP
+                islandState == "responding" && islandText.length > 48 -> RESPONDING_HEIGHT_DP
+                else -> ACTIVE_HEIGHT_DP
+            }
+        )
+        val startW = layoutParams.width
+        val startH = layoutParams.height
+        val centerX = layoutParams.x + startW / 2
+        if (startW == targetW && startH == targetH) return
+
+        sizeAnimator?.cancel()
+        sizeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220L
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { anim ->
+                val f = anim.animatedValue as Float
+                val w = (startW + (targetW - startW) * f).toInt()
+                val h = (startH + (targetH - startH) * f).toInt()
+                layoutParams.width = w
+                layoutParams.height = h
+                layoutParams.x = clampX(centerX - w / 2, w)
+                try {
+                    windowManager.updateViewLayout(pill, layoutParams)
+                } catch (_: Exception) {}
+            }
+            start()
         }
     }
 
     private fun removeButton() {
-        val view = buttonView
+        sizeAnimator?.cancel()
+        sizeAnimator = null
+        val view = islandView
         if (view != null) {
             try {
                 windowManager.removeView(view)
@@ -216,11 +316,13 @@ class FloatingButtonHandler(
                 // Already removed; ignore.
             }
         }
-        buttonView = null
+        islandView = null
+        dotView = null
+        labelView = null
+        cancelView = null
         params = null
     }
 
-    /** Drag moves the button; a tap (no real movement) fires the hotkey event. */
     private fun makeTouchListener(): View.OnTouchListener {
         var downRawX = 0f
         var downRawY = 0f
@@ -246,27 +348,22 @@ class FloatingButtonHandler(
                     }
                     if (moved) {
                         val layoutParams = params
-                        val view = buttonView
+                        val view = islandView
                         if (layoutParams != null && view != null) {
-                            layoutParams.x = clampX(downParamsX + dx)
-                            layoutParams.y = clampY(downParamsY + dy)
+                            layoutParams.x = clampX(downParamsX + dx, layoutParams.width)
+                            layoutParams.y = clampY(downParamsY + dy, layoutParams.height)
                             try {
                                 windowManager.updateViewLayout(view, layoutParams)
-                            } catch (_: Exception) {
-                                // View was removed mid-drag; ignore.
-                            }
+                            } catch (_: Exception) {}
                         }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        // Tap: fire the hotkey event Dart already listens for.
                         try {
                             hotkeyChannel.invokeMethod("onHotkeyPressed", null)
-                        } catch (_: Exception) {
-                            // Dart side not listening (yet); nothing to do.
-                        }
+                        } catch (_: Exception) {}
                     }
                     true
                 }
@@ -276,64 +373,22 @@ class FloatingButtonHandler(
         }
     }
 
-    private fun clampX(x: Int): Int {
+    private fun clampX(x: Int, widthPx: Int): Int {
         val width = activity.resources.displayMetrics.widthPixels
-        val sizePx = (BUTTON_SIZE_DP * density).toInt()
-        return x.coerceIn(0, max(0, width - sizePx))
+        return x.coerceIn(0, max(0, width - widthPx))
     }
 
-    private fun clampY(y: Int): Int {
+    private fun clampY(y: Int, heightPx: Int): Int {
         val height = activity.resources.displayMetrics.heightPixels
-        val sizePx = (BUTTON_SIZE_DP * density).toInt()
-        return y.coerceIn(0, max(0, height - sizePx))
+        return y.coerceIn(0, max(0, height - heightPx))
     }
 
-    /** Removes the button and stops tracking the foreground state. Call from MainActivity.onDestroy. */
+    /** Removes the pill and stops tracking foreground state. Call from MainActivity.onDestroy. */
     fun release() {
         try {
             activity.application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
-        } catch (_: Exception) {
-            // Never registered or already unregistered; ignore.
-        }
+        } catch (_: Exception) {}
         requestedVisible = false
         removeButton()
-    }
-}
-
-/** Blue circle with white "DJ" text. The view is exactly button-sized, so only its own area is touchable. */
-private class FloatingButtonView(context: Context) : View(context) {
-
-    private val density = context.resources.displayMetrics.density
-    private val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#0071E3")
-        style = Paint.Style.FILL
-    }
-    private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 2f * density
-    }
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 20f * density
-        typeface = Typeface.DEFAULT_BOLD
-        textAlign = Paint.Align.CENTER
-    }
-
-    private fun dp(value: Float): Float = value * density
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension(dp(56f).toInt(), dp(56f).toInt())
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
-        val radius = minOf(width, height) / 2f - dp(1f)
-        canvas.drawCircle(cx, cy, radius, circlePaint)
-        canvas.drawCircle(cx, cy, radius, outlinePaint)
-        val textY = cy - (textPaint.descent() + textPaint.ascent()) / 2f
-        canvas.drawText("DJ", cx, textY, textPaint)
     }
 }

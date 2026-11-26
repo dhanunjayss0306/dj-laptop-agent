@@ -98,8 +98,9 @@ class PrivacyScreenService {
   Uint8List? _lastFrame;
 
   /// Whether to hold on to the latest frame so the status page can draw
-  /// it. Off means no frame outlives the detection call that used it.
-  bool keepPreviewFrame = true;
+  /// it. Off by default so frames never outlive detection when the user
+  /// is not viewing Privacy Screen.
+  bool keepPreviewFrame = false;
 
   /// The most recent frame, as an encoded image. Only populated on the
   /// in-memory path.
@@ -141,6 +142,7 @@ class PrivacyScreenService {
 
     final List<CameraDevice> devices = await _nativeCamera.listDevices();
     if (devices.isEmpty) {
+      await _disposeDetector();
       onError?.call('No camera found on this device.');
       return;
     }
@@ -158,6 +160,7 @@ class PrivacyScreenService {
           .toList(),
     );
     if (choice == null) {
+      await _disposeDetector();
       onError?.call('No camera found on this device.');
       return;
     }
@@ -178,6 +181,7 @@ class PrivacyScreenService {
       deviceId: _cameraDeviceId,
       preferredName: _cameraName,
     )) {
+      await _disposeDetector();
       onError?.call(
         'Could not open the camera.\n\n'
         'This usually means another app is already using it — close '
@@ -188,6 +192,13 @@ class PrivacyScreenService {
     }
 
     _scheduleNextCapture(Duration.zero);
+  }
+
+  Future<void> _disposeDetector() async {
+    try {
+      await _tfliteDetector?.dispose();
+    } catch (_) {}
+    _tfliteDetector = null;
   }
 
   /// Self-scheduling instead of `Timer.periodic`: the next capture is
