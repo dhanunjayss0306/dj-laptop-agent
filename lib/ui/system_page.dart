@@ -36,7 +36,9 @@ class _SystemPageState extends State<SystemPage> {
       _error = null;
     });
     try {
-      final stats = await widget.app.systemOps.getSystemStats();
+      final stats = await widget.app.systemOps
+          .getSystemStats()
+          .timeout(const Duration(seconds: 4));
       if (!mounted) return;
       setState(() {
         _stats = stats;

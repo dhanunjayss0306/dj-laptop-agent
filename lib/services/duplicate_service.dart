@@ -13,6 +13,7 @@ import 'dart:io';
 import '../core/hashing.dart';
 import '../core/judge.dart';
 import '../core/models.dart';
+import '../core/security.dart';
 import 'organize_log.dart';
 import 'organize_service.dart';
 import 'system_ops.dart';
@@ -50,14 +51,8 @@ class DuplicateService {
     final bySize = <int, List<String>>{};
     for (final folder in folders) {
       if (!_isDirectory(folder)) continue;
-      await _walk(folder, (filePath) {
-        int size;
-        try {
-          size = File(filePath).statSync().size;
-        } catch (_) {
-          return;
-        }
-        if (size == 0 || size > maxDupMb * 1024 * 1024) return;
+      await _walk(folder, (filePath, size) {
+        if (size <= 0 || size > maxDupMb * 1024 * 1024) return;
         (bySize[size] ??= []).add(filePath);
       });
     }
@@ -66,13 +61,30 @@ class DuplicateService {
       final size = entry.key;
       final paths = entry.value;
       if (paths.length < 2) continue;
+
+      // Two-stage hashing: for larger files, compute a 16 KB head+tail
+      // quick signature in a background isolate first so non-matching files
+      // never incur a full-file read.
+      var candidates = paths;
+      if (size > 16384) {
+        final byQuick = <String, List<String>>{};
+        for (final p in candidates) {
+          final sig = await quickFileSignatureAsync(p);
+          if (sig == null) continue;
+          (byQuick[sig] ??= []).add(p);
+        }
+        candidates = [
+          for (final bucket in byQuick.values)
+            if (bucket.length >= 2) ...bucket,
+        ];
+        if (candidates.length < 2) continue;
+      }
+
       final byHash = <String, List<String>>{};
-      for (final p in paths) {
-        final digest = sha256File(p);
+      for (final p in candidates) {
+        final digest = await sha256FileAsync(p);
         if (digest == null) continue;
         (byHash[digest] ??= []).add(p);
-        // Hashing is the expensive step (pure-Dart SHA-256 over the
-        // whole file): yield after each file so frames keep running.
         await _yieldToEventLoop();
       }
       for (final dupPaths in byHash.values) {
@@ -83,7 +95,8 @@ class DuplicateService {
         for (final p in sorted) {
           var mtime = '';
           try {
-            mtime = File(p).statSync().modified.toIso8601String().substring(0, 10);
+            final st = await File(p).stat();
+            mtime = st.modified.toIso8601String().substring(0, 10);
           } catch (_) {}
           files.add(DuplicateFile(
             path: p,
@@ -105,31 +118,36 @@ class DuplicateService {
     return groups;
   }
 
-  Future<void> _walk(String dir, void Function(String) onFile) async {
-    List<FileSystemEntity> entries;
+  Future<void> _walk(String dir, void Function(String, int) onFile) async {
+    final stream = Directory(dir).list(followLinks: false);
+    var visited = 0;
     try {
-      entries = Directory(dir).listSync();
+      await for (final entry in stream) {
+        if (entry is Link) continue;
+        final name = entry.path.split(Platform.pathSeparator).last;
+        if (entry is Directory) {
+          if (skipDirs.contains(name.toLowerCase())) continue;
+          if (name.startsWith('.') || isSensitivePath(entry.path)) continue;
+          await _walk(entry.path, onFile);
+        } else if (entry is File) {
+          if (name.startsWith('.') || isSensitivePath(entry.path)) continue;
+          if (organizerSkip.contains(name.toLowerCase())) continue;
+          try {
+            final st = await entry.stat();
+            if (st.type == FileSystemEntityType.link) continue;
+            onFile(entry.path, st.size);
+          } catch (_) {
+            continue;
+          }
+          if (++_sinceYield >= 128) await _yieldToEventLoop();
+        }
+        visited += 1;
+        if (visited % 40 == 0) {
+          await _yieldToEventLoop();
+        }
+      }
     } catch (_) {
       return;
-    }
-    var visited = 0;
-    for (final entry in entries) {
-      final name = entry.path.split(Platform.pathSeparator).last;
-      if (entry is Directory) {
-        if (skipDirs.contains(name.toLowerCase())) continue;
-        if (name.startsWith('.')) continue;
-        if (entry is Link) continue;
-        await _walk(entry.path, onFile);
-      } else if (entry is File) {
-        if (name.startsWith('.')) continue;
-        if (organizerSkip.contains(name.toLowerCase())) continue;
-        onFile(entry.path);
-        if (++_sinceYield >= 256) await _yieldToEventLoop();
-      }
-      visited += 1;
-      if (visited % 50 == 0) {
-        await Future<void>.delayed(Duration.zero);
-      }
     }
   }
 

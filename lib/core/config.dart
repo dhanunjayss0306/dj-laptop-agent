@@ -113,6 +113,7 @@ class ConfigRepository {
             privacyDetectShoulderSurfers:
                 saved['privacyDetectShoulderSurfers'] as bool?,
             privacyStartOnLaunch: saved['privacyStartOnLaunch'] as bool?,
+            speakScreenAnswers: saved['speakScreenAnswers'] as bool?,
           );
         }
       } catch (_) {

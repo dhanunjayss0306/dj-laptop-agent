@@ -262,6 +262,24 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                           ],
                         ),
+                        if (Platform.isAndroid) ...[
+                          const SizedBox(height: 8),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: widget.app.wakeWord.enabled,
+                            builder: (context, wakeEnabled, _) => Row(
+                              children: [
+                                const Expanded(
+                                  child: Text('Hands-free "Hey DJ" wake word'),
+                                ),
+                                Switch(
+                                  value: wakeEnabled,
+                                  onChanged: (value) =>
+                                      widget.app.wakeWord.setEnabled(value),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

@@ -4,6 +4,7 @@
 // 16 hex chars). Port of src/main/utils/hashing.ts.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 int _rotr(int x, int n) => ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF;
@@ -144,6 +145,46 @@ String? sha256File(String filePath) {
   } catch (_) {
     return null;
   }
+}
+
+/// Fast partial hash (first + last [sampleBytes]) to eliminate non-matching
+/// large files without reading the entire file. Returns null on error.
+String? quickFileSignature(String filePath, {int sampleBytes = 8192}) {
+  try {
+    final file = File(filePath);
+    final len = file.lengthSync();
+    if (len <= sampleBytes * 2) return sha256File(filePath);
+    final raf = file.openSync(mode: FileMode.read);
+    try {
+      final hasher = _Sha256Incremental();
+      final head = Uint8List(sampleBytes);
+      final hRead = raf.readIntoSync(head);
+      if (hRead > 0) hasher.update(head.sublist(0, hRead));
+      raf.setPositionSync(len - sampleBytes);
+      final tail = Uint8List(sampleBytes);
+      final tRead = raf.readIntoSync(tail);
+      if (tRead > 0) hasher.update(tail.sublist(0, tRead));
+      return hasher.digestHex();
+    } finally {
+      raf.closeSync();
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Non-blocking [quickFileSignature] executed in a background isolate.
+Future<String?> quickFileSignatureAsync(String filePath,
+    {int sampleBytes = 8192}) {
+  return Isolate.run(
+    () => quickFileSignature(filePath, sampleBytes: sampleBytes),
+  );
+}
+
+/// Non-blocking [sha256File] executed in a background isolate so large
+/// duplicate scans never freeze the UI thread.
+Future<String?> sha256FileAsync(String filePath) {
+  return Isolate.run(() => sha256File(filePath));
 }
 
 /// Incremental SHA-256: buffers complete 64-byte blocks, pads at the end.

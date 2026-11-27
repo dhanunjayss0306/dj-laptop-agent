@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import '../core/hashing.dart';
 import '../core/models.dart';
+import '../core/security.dart';
 import '../core/text_utils.dart';
 import 'file_reader.dart';
 
@@ -391,49 +392,49 @@ class IndexService {
     Set<String> seen, [
     void Function(String)? onDir,
   ]) async {
-    List<FileSystemEntity> entries;
+    final stream = Directory(dir).list(followLinks: false);
+    var visited = 0;
     try {
-      entries = Directory(dir).listSync();
+      await for (final entry in stream) {
+        final name = entry.path.split(Platform.pathSeparator).last;
+        if (entry is Link) continue;
+        if (entry is Directory) {
+          if (skipDirsIndex.contains(name.toLowerCase())) continue;
+          if (name.startsWith('.') || isSensitivePath(entry.path)) continue;
+          onDir?.call(entry.path);
+          await _walkDir(entry.path, onFile, seen, onDir);
+        } else if (entry is File) {
+          if (name.startsWith('.') || isSensitivePath(entry.path)) continue;
+          final ext = _ext(name);
+          if (!readableExtsIndex.contains(ext)) continue;
+          int size;
+          double mtimeMs;
+          try {
+            final st = await entry.stat();
+            if (st.type == FileSystemEntityType.link) continue;
+            size = st.size;
+            mtimeMs = st.modified.millisecondsSinceEpoch.toDouble();
+          } catch (_) {
+            continue;
+          }
+          if (size > maxFileMbIndex * 1024 * 1024) continue;
+          String key;
+          try {
+            key = entry.resolveSymbolicLinksSync();
+          } catch (_) {
+            key = entry.path;
+          }
+          if (seen.contains(key)) continue;
+          seen.add(key);
+          onFile(entry.path, size, mtimeMs);
+        }
+        visited += 1;
+        if (visited % 40 == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
     } catch (_) {
       return;
-    }
-    var visited = 0;
-    for (final entry in entries) {
-      final name = entry.path.split(Platform.pathSeparator).last;
-      if (entry is Directory) {
-        if (skipDirsIndex.contains(name.toLowerCase())) continue;
-        if (name.startsWith('.')) continue;
-        if (entry is Link) continue;
-        onDir?.call(entry.path);
-        await _walkDir(entry.path, onFile, seen, onDir);
-      } else if (entry is File) {
-        if (name.startsWith('.')) continue;
-        final ext = _ext(name);
-        if (!readableExtsIndex.contains(ext)) continue;
-        int size;
-        double mtimeMs;
-        try {
-          final st = entry.statSync();
-          size = st.size;
-          mtimeMs = st.modified.millisecondsSinceEpoch.toDouble();
-        } catch (_) {
-          continue;
-        }
-        if (size > maxFileMbIndex * 1024 * 1024) continue;
-        String key;
-        try {
-          key = entry.resolveSymbolicLinksSync();
-        } catch (_) {
-          key = entry.path;
-        }
-        if (seen.contains(key)) continue;
-        seen.add(key);
-        onFile(entry.path, size, mtimeMs);
-      }
-      visited += 1;
-      if (visited % 50 == 0) {
-        await Future<void>.delayed(Duration.zero);
-      }
     }
   }
 

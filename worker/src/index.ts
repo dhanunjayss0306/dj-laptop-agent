@@ -107,6 +107,42 @@ function parseDataImageUrl(url: string): DataImage | null {
 // anything absurd so one bad request cannot blow up the Worker.
 const MAX_IMAGE_BASE64_CHARS = 5_000_000; // ~3.75 MB of image bytes
 const MAX_IMAGES_PER_MESSAGE = 4;
+const MAX_JSON_BODY_BYTES = 12 * 1024 * 1024;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 120;
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  'cache-control': 'no-store',
+};
+
+const ipRateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(request: Request): boolean {
+  const ip = request.headers.get('cf-connecting-ip') ?? 'local';
+  const now = Date.now();
+  const bucket = ipRateBuckets.get(ip);
+  if (bucket === undefined || now >= bucket.resetAt) {
+    if (ipRateBuckets.size > 2000) ipRateBuckets.clear();
+    ipRateBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_LIMIT_MAX_REQUESTS;
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const maxLen = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < maxLen; i++) {
+    const ca = i < a.length ? a.charCodeAt(i) : 0;
+    const cb = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= ca ^ cb;
+  }
+  return diff === 0;
+}
 
 interface ChatMessage {
   role: string;
@@ -116,7 +152,7 @@ interface ChatMessage {
 function json(body: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ...extraHeaders },
+    headers: { 'content-type': 'application/json', ...SECURITY_HEADERS, ...extraHeaders },
   });
 }
 
@@ -163,16 +199,27 @@ function isAuthorized(request: Request, env: Env): boolean {
   const expected = env.DJ_SHARED_KEY;
   if (expected === undefined || expected === '') return true;
   const headerKey = request.headers.get('X-DJ-Key');
-  if (headerKey !== null && headerKey === expected) return true;
+  if (headerKey !== null && timingSafeEqualString(headerKey, expected)) return true;
   const auth = request.headers.get('Authorization');
-  if (auth !== null && auth === `Bearer ${expected}`) return true;
+  if (auth !== null && timingSafeEqualString(auth, `Bearer ${expected}`)) return true;
   return false;
 }
 
+class PayloadTooLargeError extends Error {}
+
 async function readJsonBody(request: Request): Promise<unknown> {
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BODY_BYTES) {
+    throw new PayloadTooLargeError('request too large');
+  }
   try {
-    return await request.json();
-  } catch {
+    const rawText = await request.text();
+    if (rawText.length > MAX_JSON_BODY_BYTES) {
+      throw new PayloadTooLargeError('request too large');
+    }
+    return JSON.parse(rawText);
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) throw err;
     return null;
   }
 }
@@ -678,6 +725,10 @@ export default {
       return withCors(errorJson('unauthorized', 401), cors);
     }
 
+    if (isProtectedRoute && isRateLimited(request)) {
+      return withCors(errorJson('too many requests', 429), cors);
+    }
+
     let response: Response;
     try {
       if (request.method === 'GET' && url.pathname === '/health') {
@@ -693,9 +744,13 @@ export default {
       } else {
         response = errorJson('not found', 404);
       }
-    } catch {
-      // Never leak internals (or secrets) in an error body.
-      response = errorJson('worker error', 500);
+    } catch (err) {
+      if (err instanceof PayloadTooLargeError) {
+        response = errorJson('request too large', 413);
+      } else {
+        // Never leak internals (or secrets) in an error body.
+        response = errorJson('worker error', 500);
+      }
     }
     return withCors(response, cors);
   },

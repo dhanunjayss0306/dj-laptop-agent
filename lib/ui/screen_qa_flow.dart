@@ -11,8 +11,60 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/brain.dart';
 import '../core/worker_client.dart';
+import '../features/agent_mode.dart';
+import '../features/wake_word.dart';
 import 'app_state.dart';
+
+enum VoiceRouteKind { chat, agent, screen }
+
+/// Classify whether a spoken query is an instant local/chat command, an
+/// autonomous AgentMode task, or a ScreenQA visual question ("Hey Clicky /
+/// Hey Bixby" hybrid routing).
+VoiceRouteKind classifyVoiceCommand(
+  String rawText, [
+  List<String> knownFolders = const [],
+]) {
+  final text = rawText.trim();
+  if (text.isEmpty) return VoiceRouteKind.screen;
+  final low = text.toLowerCase();
+  if (low.startsWith('agent ') || low.startsWith('dj agent ')) {
+    return VoiceRouteKind.agent;
+  }
+  final action = BrainService().decide(text, knownFolders);
+  switch (action.action) {
+    case 'openApp':
+    case 'openFolder':
+    case 'organize':
+    case 'duplicates':
+    case 'list':
+    case 'summarize':
+      return VoiceRouteKind.chat;
+    case 'help':
+      return (low == 'help' ||
+              low.contains('what can you do') ||
+              low.contains('help me'))
+          ? VoiceRouteKind.chat
+          : VoiceRouteKind.screen;
+    case 'search':
+      final isExplicitFileCmd = RegExp(
+        r'^(?:find|search|look for|locate|open)\b',
+        caseSensitive: false,
+      ).hasMatch(low);
+      final isVisualHint = low.contains('screen') ||
+          low.contains('this') ||
+          low.contains('here') ||
+          low.contains('click') ||
+          low.contains('point') ||
+          low.endsWith('?');
+      return (isExplicitFileCmd && !isVisualHint)
+          ? VoiceRouteKind.chat
+          : VoiceRouteKind.screen;
+    default:
+      return VoiceRouteKind.screen;
+  }
+}
 
 /// Compact fallback prompt used only when microphone / STT is unavailable.
 Future<String?> _askQuestionDialog(BuildContext context, DjAppState app) async {
@@ -174,25 +226,46 @@ Future<({bool cancelled, String? transcript})> _listenVoiceQuestion(
   return (cancelled: false, transcript: null);
 }
 
-/// Run one voice-first ScreenQA round with live "fake lyrics" captions,
-/// animated cursor pointing + circles, and spoken audio reply.
-Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
+/// Run one voice-first "Hey DJ" round: listens (unless [initialCommand]
+/// was captured by passive wake-word), routes instant commands & agent tasks
+/// directly without slow vision captures, or streams live "fake lyrics" +
+/// cursor pointers for screen questions. Every turn also syncs to Chat.
+Future<void> runScreenQaFlow(
+  BuildContext context,
+  DjAppState app, {
+  String? initialCommand,
+}) async {
+  app.wakeWord.setPaused(true);
   await app.voiceChannel.stopSpeak();
   final client = app.buildWorkerClient();
 
-  String? question;
+  String? question = initialCommand?.trim();
   try {
-    final voice = await _listenVoiceQuestion(app, client);
-    if (voice.cancelled) {
-      await app.updateCompanion('idle');
-      return;
+    if (question == null || question.isEmpty) {
+      final voice = await _listenVoiceQuestion(app, client);
+      if (voice.cancelled) {
+        await app.updateCompanion('idle');
+        return;
+      }
+      question = voice.transcript;
     }
-    question = voice.transcript;
     if (question == null || question.isEmpty) {
       if (!context.mounted) return;
       question = await _askQuestionDialog(context, app);
     }
     if (question == null || question.isEmpty) return;
+
+    final wake = extractWakeCommand(question);
+    if (wake.matched) {
+      if (wake.command.isEmpty) {
+        if (!context.mounted) return;
+        final followUp = await _askQuestionDialog(context, app);
+        if (followUp == null || followUp.isEmpty) return;
+        question = followUp;
+      } else {
+        question = wake.command;
+      }
+    }
 
     var cancelled = false;
     final cancelSub = app.hotkeyChannel.onCancelPressed.listen((_) {
@@ -202,8 +275,64 @@ Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
       app.updateCompanion('idle');
     });
 
-    final qa = app.buildScreenQAForClient(client);
+    final knownFolders =
+        app.indexer.listFolders().map((f) => f.name).toList();
+    final route = classifyVoiceCommand(question, knownFolders);
     try {
+      final speakAloud = app.config.value.speakScreenAnswers ?? false;
+
+      if (route == VoiceRouteKind.agent) {
+        final task = question
+            .replaceFirst(
+              RegExp(r'^(?:dj\s+)?agent\s+', caseSensitive: false),
+              '',
+            )
+            .trim();
+        await app.updateCompanion('thinking', 'Running: $task');
+        late final StreamSubscription<AgentProgress> stepSub;
+        stepSub = app.agentMode.updates.listen((p) {
+          if (!cancelled) {
+            unawaited(app.updateCompanion('thinking', p.description));
+          }
+        });
+        AgentTaskResult result;
+        try {
+          result = await app.agentMode.run(task);
+        } finally {
+          await stepSub.cancel();
+        }
+        if (cancelled) return;
+        app.postVoiceTurn(question, result.answer);
+        await app.updateCompanion('responding', result.answer);
+        if (speakAloud && result.answer.isNotEmpty) {
+          await app.speakReply(result.answer, client: client);
+        }
+        await Future<void>.delayed(Duration(seconds: speakAloud ? 5 : 7));
+        if (!cancelled) {
+          await app.updateCompanion('idle');
+          if (!app.companionFollow.value) await app.cursorChannel.hideCursor();
+        }
+        return;
+      }
+
+      if (route == VoiceRouteKind.chat) {
+        await app.updateCompanion('thinking', question);
+        final response = await app.chat.handle(question);
+        if (cancelled) return;
+        app.postVoiceTurn(question, response.text, response);
+        await app.updateCompanion('responding', response.text);
+        if (speakAloud && response.text.isNotEmpty) {
+          await app.speakReply(response.text, client: client);
+        }
+        await Future<void>.delayed(Duration(seconds: speakAloud ? 5 : 6));
+        if (!cancelled) {
+          await app.updateCompanion('idle');
+          if (!app.companionFollow.value) await app.cursorChannel.hideCursor();
+        }
+        return;
+      }
+
+      final qa = app.buildScreenQAForClient(client);
       final answer = await qa.askStreaming(
         question,
         speakAnswer: false,
@@ -221,8 +350,10 @@ Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
           app.screenQaHistory.removeRange(0, app.screenQaHistory.length - 20);
         }
       }
+      if (answer.text.isNotEmpty) {
+        app.postVoiceTurn(question, answer.text);
+      }
 
-      final speakAloud = app.config.value.speakScreenAnswers ?? false;
       await app.updateCompanion('responding', answer.text);
       if (speakAloud && answer.text.isNotEmpty) {
         await app.speakReply(answer.text, client: client);
@@ -242,6 +373,7 @@ Future<void> runScreenQaFlow(BuildContext context, DjAppState app) async {
       await cancelSub.cancel();
     }
   } finally {
+    app.wakeWord.setPaused(false);
     client?.close();
   }
 }

@@ -105,6 +105,7 @@ class _HomeShellState extends State<HomeShell> {
       widget.app.cursorChannel.hideCursor();
       widget.app.updateCompanion('idle');
     });
+    widget.app.pendingWakeCommand.addListener(_onWakeCommand);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!widget.app.indexer.hasIndex()) {
@@ -113,8 +114,18 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
+  void _onWakeCommand() {
+    final cmd = widget.app.pendingWakeCommand.value;
+    if (cmd == null || _screenQaRunning || !mounted) return;
+    widget.app.pendingWakeCommand.value = null;
+    _screenQaRunning = true;
+    runScreenQaFlow(context, widget.app, initialCommand: cmd)
+        .whenComplete(() => _screenQaRunning = false);
+  }
+
   @override
   void dispose() {
+    widget.app.pendingWakeCommand.removeListener(_onWakeCommand);
     _hotkeySub?.cancel();
     _cancelSub?.cancel();
     super.dispose();

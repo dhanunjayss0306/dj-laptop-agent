@@ -60,7 +60,9 @@ class _ToolsPageState extends State<ToolsPage> {
       enabled: _tutorEnabled,
     );
     try {
-      final explanation = await tutor.explainFromScreen(appName, question);
+      final explanation = await tutor
+          .explainFromScreen(appName, question)
+          .timeout(const Duration(seconds: 25));
       if (!mounted) return;
       setState(() {
         _tutorBusy = false;

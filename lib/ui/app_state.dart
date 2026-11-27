@@ -12,6 +12,7 @@
 //   Cloud settings live in dj_cloud.json next to dj_config.json.
 // - No API reports whether a tray icon exists, so hasTray is
 //   Platform.isWindows (the Windows runner creates the tray).
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -23,6 +24,7 @@ import '../core/capability.dart';
 import '../core/config.dart' as cfg;
 import '../core/local_model.dart';
 import '../core/models.dart';
+import '../core/security.dart';
 import '../core/worker_client.dart';
 import '../features/account/account.dart';
 import '../features/agent_mode.dart';
@@ -30,6 +32,7 @@ import '../features/integrations/integrations.dart';
 import '../features/privacy_screen/privacy_screen_controller.dart';
 import '../features/routines.dart';
 import '../features/screen_qa.dart';
+import '../features/wake_word.dart';
 import '../features/walkthrough.dart';
 import '../platform/cursor_channel.dart';
 import '../platform/floating_button_channel.dart';
@@ -124,6 +127,12 @@ class DjAppState {
     );
     integrations = defaultRegistry(dataDir: dataDir, systemOps: systemOps);
     walkthroughEngine = WalkthroughEngine(cursor: cursorChannel);
+    wakeWord = WakeWordController(
+      voiceChannel: voiceChannel,
+      onWakeCommand: (command) async {
+        pendingWakeCommand.value = command;
+      },
+    );
     // Privacy Screen (Windows only; on Android the page shows a
     // laptop-only message and the controller never starts the camera).
     // Settings changes are saved straight to dj_config.json without a
@@ -177,6 +186,32 @@ class DjAppState {
   late final RoutineStore routines;
   late final IntegrationRegistry integrations;
   late final WalkthroughEngine walkthroughEngine;
+  late final WakeWordController wakeWord;
+
+  /// Stream of voice-initiated turns ("Hey DJ ...") so Command Center chat
+  /// always stays in sync with Dynamic Island / hotkey voice runs.
+  final StreamController<
+          ({String userText, String assistantText, ChatResponse? response})>
+      voiceChatEvents = StreamController<
+          ({
+            String userText,
+            String assistantText,
+            ChatResponse? response
+          })>.broadcast();
+
+  /// Queue for wake-word commands fired while on a page outside HomeShell.
+  final ValueNotifier<String?> pendingWakeCommand = ValueNotifier<String?>(null);
+
+  void postVoiceTurn(String userText, String assistantText,
+      [ChatResponse? response]) {
+    if (!voiceChatEvents.isClosed) {
+      voiceChatEvents.add((
+        userText: userText,
+        assistantText: assistantText,
+        response: response,
+      ));
+    }
+  }
 
   /// Privacy Screen controller (Windows only). Owns the camera, the
   /// gaze decision, the blackout window and the Ctrl+Alt+P override.
@@ -629,21 +664,33 @@ class DjAppState {
   Map<String, AgentToolFn> _agentTools() {
     return {
       'search': (input) async {
-        final hits = await indexer.search(input, 5);
+        final hits = (await indexer.search(input, 8))
+            .where((h) => !isSensitivePath(h.path))
+            .take(5)
+            .toList();
         if (hits.isEmpty) return 'No files found for "$input".';
         return hits.map((h) => h.name).join('\n');
       },
       'openFile': (input) async {
         final path = input.trim();
         if (path.isNotEmpty) {
+          if (isSensitivePath(path)) {
+            return 'Blocked: cannot open sensitive or credential files.';
+          }
           try {
             if (File(path).existsSync()) {
+              final guard = WorkspaceGuard(cfg.enabledFolders(config.value));
+              if (!guard.isAllowed(path)) {
+                return 'Blocked: file is outside your allowed DJ folders.';
+              }
               final result = await systemOps.openFile(path);
               return result.message;
             }
           } catch (_) {}
         }
-        final hits = await indexer.search(path, 3);
+        final hits = (await indexer.search(path, 5))
+            .where((h) => !isSensitivePath(h.path))
+            .toList();
         if (hits.isEmpty) return 'No file found for "$input".';
         final result = await systemOps.openFile(hits.first.path);
         return result.ok ? 'Opened ${hits.first.name}.' : result.message;

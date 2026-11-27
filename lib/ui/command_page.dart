@@ -49,6 +49,9 @@ class _CommandPageState extends State<CommandPage> {
   StreamSubscription<String>? _partialSub;
   StreamSubscription<String>? _finalSub;
   StreamSubscription<String>? _speechErrSub;
+  StreamSubscription<
+          ({String userText, String assistantText, ChatResponse? response})>?
+      _voiceTurnSub;
 
   @override
   void initState() {
@@ -56,6 +59,18 @@ class _CommandPageState extends State<CommandPage> {
     _seenBuildVersion = widget.app.indexBuiltVersion.value;
     widget.app.indexBuiltVersion.addListener(_onIndexBuilt);
     _composer.addListener(() => setState(() {}));
+    _voiceTurnSub = widget.app.voiceChatEvents.stream.listen((turn) {
+      if (!mounted) return;
+      setState(() {
+        _messages.add(_ChatEntry(isUser: true, text: turn.userText));
+        _messages.add(_ChatEntry(
+          isUser: false,
+          text: turn.assistantText,
+          response: turn.response,
+        ));
+      });
+      _scrollToBottom();
+    });
     _partialSub = widget.app.voiceChannel.onPartialResult.listen((text) {
       if (!mounted || !_listening) return;
       _composer.value = TextEditingValue(
@@ -90,6 +105,7 @@ class _CommandPageState extends State<CommandPage> {
     _partialSub?.cancel();
     _finalSub?.cancel();
     _speechErrSub?.cancel();
+    _voiceTurnSub?.cancel();
     widget.app.indexBuiltVersion.removeListener(_onIndexBuilt);
     _composer.dispose();
     _scroll.dispose();

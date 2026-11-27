@@ -17,17 +17,30 @@ class MemoryPage extends StatefulWidget {
 
 class _MemoryPageState extends State<MemoryPage> {
   final TextEditingController _search = TextEditingController();
-  late final String _memoryMd;
-  late final List<({String date, String text})> _daily;
+  String _memoryMd = '';
+  List<({String date, String text})> _daily = const [];
   int _tab = 0;
 
   @override
   void initState() {
     super.initState();
-    final content = widget.app.memory.readContent();
-    _memoryMd = content.memoryMd;
-    _daily = content.daily;
     _search.addListener(() => setState(() {}));
+    _loadMemory();
+  }
+
+  Future<void> _loadMemory() async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    try {
+      final content = widget.app.memory.readContent();
+      if (!mounted) return;
+      setState(() {
+        _memoryMd = content.memoryMd;
+        _daily = content.daily;
+      });
+    } catch (_) {
+      // Fail-safe: leave empty memory view rather than blocking page mount.
+    }
   }
 
   @override
