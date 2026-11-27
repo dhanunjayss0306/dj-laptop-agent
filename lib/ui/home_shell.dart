@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/models.dart';
 import 'agent_page.dart';
 import 'app_state.dart';
 import 'command_page.dart';
@@ -731,7 +732,7 @@ class _HeaderDynamicIsland extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppConfig>(
       valueListenable: app.config,
-      builder: (context, _, __) {
+      builder: (context, config, _) {
         return ValueListenableBuilder<({String state, String text})>(
           valueListenable: app.companionState,
           builder: (context, companion, _) {
