@@ -77,6 +77,9 @@ Future<void> main() async {
   // ignore: unawaited_futures
   app.refreshStatus().then(
       (_) => StartupLog.log('refreshStatus done'));
+  // Non-blocking release check for automatic one-click updates.
+  // ignore: unawaited_futures
+  app.checkForUpdates();
 }
 
 // Set by the first-frame post-frame callback above.

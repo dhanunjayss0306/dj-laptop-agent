@@ -546,8 +546,32 @@ class _Banners extends StatelessWidget {
         ValueListenableBuilder(
           valueListenable: app.updateState,
           builder: (context, update, _) {
+            if (update.status == 'downloading') {
+              return _banner(context, text: update.message);
+            }
             if (update.status != 'ready') return const SizedBox.shrink();
-            return _banner(context, text: update.message);
+            return _banner(
+              context,
+              text: update.message,
+              actionLabel:
+                  Platform.isWindows ? 'Update & Restart' : 'Copy APK link',
+              onAction: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final res = await app.applyUpdateNow();
+                if (res != null && context.mounted) {
+                  if (!Platform.isWindows && res.startsWith('http')) {
+                    await Clipboard.setData(ClipboardData(text: res));
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Copied Android APK download link.'),
+                      ),
+                    );
+                  } else {
+                    messenger.showSnackBar(SnackBar(content: Text(res)));
+                  }
+                }
+              },
+            );
           },
         ),
         ValueListenableBuilder(

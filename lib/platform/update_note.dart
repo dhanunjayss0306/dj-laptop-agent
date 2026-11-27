@@ -21,6 +21,6 @@
 
 /// Short note shown in Settings > About (or wherever update info lives).
 const String windowsUpdateNote =
-    'DJ updates come from GitHub Releases: download the new installer and '
-    'run it. Your files and index in %APPDATA%\\DJ\\dj_data are never '
-    'touched by an update. Store builds update through the Microsoft Store.';
+    'Click Check for updates / Update & Restart below to upgrade in-place '
+    'automatically without re-extracting zip files. Your settings and index in '
+    '%APPDATA%\\DJ\\dj_data are never touched by an update.';

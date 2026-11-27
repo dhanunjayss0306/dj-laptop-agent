@@ -4,9 +4,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/local_model.dart';
 import '../core/models.dart';
+import '../platform/auto_updater.dart';
 import '../platform/update_note.dart';
 import 'app_state.dart';
 import 'folders_dialog.dart';
@@ -397,16 +399,96 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
                   _card(
                     title: 'About DJ',
-                    child: const Column(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'DJ runs on this laptop only. Files never leave '
-                          'the laptop, and DJ works with no model and no '
-                          'API key.',
+                        const Text(
+                          'DJ v$kCurrentDjVersion — runs locally on your '
+                          'device. Files never leave the laptop.',
                         ),
-                        SizedBox(height: 8),
-                        Text(windowsUpdateNote),
+                        const SizedBox(height: 8),
+                        const Text(windowsUpdateNote),
+                        const SizedBox(height: 12),
+                        ValueListenableBuilder<UpdateState>(
+                          valueListenable: widget.app.updateState,
+                          builder: (context, update, _) {
+                            final checking = update.status == 'checking';
+                            final downloading = update.status == 'downloading';
+                            final ready = update.status == 'ready';
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (update.message.isNotEmpty) ...[
+                                  Text(
+                                    update.message,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: ready
+                                          ? const Color(0xFF0071E3)
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    OutlinedButton(
+                                      onPressed: (checking || downloading)
+                                          ? null
+                                          : () => widget.app.checkForUpdates(
+                                              userInitiated: true),
+                                      child: Text(
+                                        checking
+                                            ? 'Checking...'
+                                            : 'Check for updates',
+                                      ),
+                                    ),
+                                    if (ready)
+                                      ElevatedButton(
+                                        onPressed: downloading
+                                            ? null
+                                            : () async {
+                                                final messenger =
+                                                    ScaffoldMessenger.of(
+                                                        context);
+                                                final res = await widget.app
+                                                    .applyUpdateNow();
+                                                if (res != null &&
+                                                    context.mounted) {
+                                                  if (!Platform.isWindows &&
+                                                      res.startsWith('http')) {
+                                                    await Clipboard.setData(
+                                                        ClipboardData(
+                                                            text: res));
+                                                    messenger.showSnackBar(
+                                                      const SnackBar(
+                                                        content: Text(
+                                                          'Copied APK link to clipboard.',
+                                                        ),
+                                                      ),
+                                                    );
+                                                  } else {
+                                                    messenger.showSnackBar(
+                                                      SnackBar(
+                                                          content: Text(res)),
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                        child: Text(
+                                          Platform.isWindows
+                                              ? 'Update & Restart (v${update.version ?? ''})'
+                                              : 'Copy APK Link (v${update.version ?? ''})',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),

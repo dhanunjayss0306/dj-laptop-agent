@@ -5,6 +5,7 @@ import 'package:dj/core/hashing.dart';
 import 'package:dj/core/models.dart';
 import 'package:dj/core/security.dart';
 import 'package:dj/features/wake_word.dart';
+import 'package:dj/platform/auto_updater.dart';
 import 'package:dj/services/duplicate_service.dart';
 import 'package:dj/ui/app_state.dart';
 import 'package:dj/ui/screen_qa_flow.dart';
@@ -154,6 +155,16 @@ void main() {
       } finally {
         tmp.deleteSync(recursive: true);
       }
+    });
+  });
+
+  group('auto updater semver checks', () {
+    test('detects strictly newer releases cleanly', () {
+      expect(parseSemver('v1.2.16+16'), [1, 2, 16]);
+      expect(isNewerVersion('v1.2.17', '1.2.16'), isTrue);
+      expect(isNewerVersion('v2.0.0', '1.9.9'), isTrue);
+      expect(isNewerVersion('v1.2.16', '1.2.16'), isFalse);
+      expect(isNewerVersion('v1.2.15', '1.2.16'), isFalse);
     });
   });
 }

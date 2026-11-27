@@ -61,7 +61,9 @@ jobs:
       - run: flutter build windows --release
       - name: Add tray icon next to dj.exe
         shell: pwsh
-        run: Copy-Item windows/runner/resources/app_icon.ico build/windows/x64/runner/Release/tray-icon.ico
+        run: |
+          Copy-Item windows/runner/resources/app_icon.ico build/windows/x64/runner/Release/tray-icon.ico
+          Copy-Item scripts/update-dj.ps1 build/windows/x64/runner/Release/update-dj.ps1
       - name: Zip the Windows build
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dj-windows.zip

@@ -34,6 +34,7 @@ import '../features/routines.dart';
 import '../features/screen_qa.dart';
 import '../features/wake_word.dart';
 import '../features/walkthrough.dart';
+import '../platform/auto_updater.dart';
 import '../platform/cursor_channel.dart';
 import '../platform/floating_button_channel.dart';
 import '../platform/hotkey_channel.dart';
@@ -228,6 +229,82 @@ class DjAppState {
   final ValueNotifier<UpdateState> updateState = ValueNotifier<UpdateState>(
     const UpdateState(status: 'idle', message: ''),
   );
+  final DjAutoUpdater updater = DjAutoUpdater();
+  DjReleaseInfo? latestRelease;
+
+  /// Check GitHub Releases for a newer version of DJ.
+  Future<void> checkForUpdates({bool userInitiated = false}) async {
+    if (isWindowsStoreBuild()) return;
+    if (userInitiated) {
+      updateState.value = const UpdateState(
+        status: 'checking',
+        message: 'Checking for updates...',
+      );
+    }
+    final info = await updater.checkLatest();
+    if (info == null) {
+      if (userInitiated) {
+        updateState.value = const UpdateState(
+          status: 'error',
+          message: 'Could not reach GitHub Releases right now.',
+        );
+      }
+      return;
+    }
+    if (isNewerVersion(info.tagName, kCurrentDjVersion)) {
+      latestRelease = info;
+      updateState.value = UpdateState(
+        status: 'ready',
+        version: info.version,
+        message: 'DJ v${info.version} is available (running v$kCurrentDjVersion).',
+      );
+      return;
+    }
+    if (userInitiated) {
+      updateState.value = const UpdateState(
+        status: 'up-to-date',
+        version: kCurrentDjVersion,
+        message: 'You already have the latest DJ (v$kCurrentDjVersion).',
+      );
+    }
+  }
+
+  /// Download and install the latest Windows release in-place, deleting the
+  /// zip automatically and restarting DJ. Returns an error message on failure.
+  Future<String?> applyUpdateNow() async {
+    final release = latestRelease;
+    if (release == null) {
+      return 'No update information loaded yet.';
+    }
+    if (Platform.isWindows) {
+      final zipUrl = release.windowsZipUrl;
+      if (zipUrl == null || zipUrl.isEmpty) {
+        return 'Latest release has no Windows zip asset.';
+      }
+      final err = await updater.downloadAndApplyWindowsUpdate(
+        zipUrl,
+        onProgress: (msg) {
+          updateState.value = UpdateState(
+            status: 'downloading',
+            version: release.version,
+            message: msg,
+          );
+        },
+      );
+      if (err != null) {
+        updateState.value = UpdateState(
+          status: 'ready',
+          version: release.version,
+          message: 'DJ v${release.version} is available (error: $err).',
+        );
+        return err;
+      }
+      // Detached PowerShell updater waits for our PID, unpacks over the
+      // install folder, removes the zip, and relaunches the new dj.exe.
+      exit(0);
+    }
+    return release.androidApkUrl ?? release.htmlUrl;
+  }
 
   /// Live companion overlay state ('idle', 'listening', 'thinking',
   /// 'responding') and caption text ("fake lyrics") shared between the
