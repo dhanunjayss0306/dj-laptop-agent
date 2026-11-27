@@ -15,15 +15,32 @@
 // channel does anything. The safety rules (step limit, stuck detection,
 // show-before-click) live in Dart, in the caller.
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 class CursorChannel {
   CursorChannel({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel(_channelName);
+      : _channel = channel ?? const MethodChannel(_channelName) {
+    _channel.setMethodCallHandler(_handleNativeCall);
+  }
 
   static const String _channelName = 'com.dhanunjay.dj/cursor';
 
   final MethodChannel _channel;
+  final StreamController<void> _islandClickedController =
+      StreamController<void>.broadcast();
+
+  /// Fires when the user clicks the floating Windows Dynamic Island pill.
+  Stream<void> get onIslandClicked => _islandClickedController.stream;
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'onIslandClicked') {
+      if (!_islandClickedController.isClosed) {
+        _islandClickedController.add(null);
+      }
+    }
+  }
 
   /// Shows the fake cursor at ([x], [y]) in virtual-screen pixels, with an
   /// optional [label] in the bubble. Returns false when the overlay could

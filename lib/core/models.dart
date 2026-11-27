@@ -59,6 +59,9 @@ class AppConfig {
   final bool? privacyStartOnLaunch;
   /// Speak screen answers aloud via TTS. Null = false (text-only captions).
   final bool? speakScreenAnswers;
+  /// Saved global shortcut preset id ('ctrl_alt_d', 'alt_space',
+  /// 'ctrl_shift_d', 'f9'). Null = 'ctrl_alt_d'.
+  final String? hotkeyPreset;
   const AppConfig({
     required this.folders,
     this.localModel,
@@ -70,6 +73,7 @@ class AppConfig {
     this.privacyDetectShoulderSurfers,
     this.privacyStartOnLaunch,
     this.speakScreenAnswers,
+    this.hotkeyPreset,
   });
   factory AppConfig.fromJson(Map<String, dynamic> j) => AppConfig(
         folders: (j['folders'] as List? ?? [])
@@ -92,6 +96,7 @@ class AppConfig {
             j['privacyDetectShoulderSurfers'] as bool?,
         privacyStartOnLaunch: j['privacyStartOnLaunch'] as bool?,
         speakScreenAnswers: j['speakScreenAnswers'] as bool?,
+        hotkeyPreset: j['hotkeyPreset'] as String?,
       );
   Map<String, dynamic> toJson() => {
         'folders': folders.map((f) => f.toJson()).toList(),
@@ -108,6 +113,7 @@ class AppConfig {
           'privacyStartOnLaunch': privacyStartOnLaunch,
         if (speakScreenAnswers != null)
           'speakScreenAnswers': speakScreenAnswers,
+        if (hotkeyPreset != null) 'hotkeyPreset': hotkeyPreset,
       };
   AppConfig copyWith({
     List<FolderEntry>? folders,
@@ -120,6 +126,7 @@ class AppConfig {
     bool? privacyDetectShoulderSurfers,
     bool? privacyStartOnLaunch,
     bool? speakScreenAnswers,
+    String? hotkeyPreset,
   }) =>
       AppConfig(
         folders: folders ?? this.folders,
@@ -134,6 +141,7 @@ class AppConfig {
         privacyStartOnLaunch:
             privacyStartOnLaunch ?? this.privacyStartOnLaunch,
         speakScreenAnswers: speakScreenAnswers ?? this.speakScreenAnswers,
+        hotkeyPreset: hotkeyPreset ?? this.hotkeyPreset,
       );
 }
 

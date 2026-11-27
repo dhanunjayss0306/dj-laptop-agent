@@ -63,6 +63,7 @@ class _HomeShellState extends State<HomeShell> {
   // tab instead of pointing at the wrong page.
   int _lastPrimary = 0;
   StreamSubscription<void>? _hotkeySub;
+  StreamSubscription<void>? _islandSub;
   StreamSubscription<void>? _cancelSub;
   bool _screenQaRunning = false;
   // Pages are built lazily: only the Command Center (index 0) exists
@@ -100,6 +101,12 @@ class _HomeShellState extends State<HomeShell> {
       runScreenQaFlow(context, widget.app)
           .whenComplete(() => _screenQaRunning = false);
     });
+    _islandSub = widget.app.cursorChannel.onIslandClicked.listen((_) {
+      if (_screenQaRunning || !mounted) return;
+      _screenQaRunning = true;
+      runScreenQaFlow(context, widget.app)
+          .whenComplete(() => _screenQaRunning = false);
+    });
     _cancelSub = widget.app.hotkeyChannel.onCancelPressed.listen((_) {
       widget.app.voiceChannel.stopSpeak();
       widget.app.cursorChannel.hideCursor();
@@ -127,6 +134,7 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     widget.app.pendingWakeCommand.removeListener(_onWakeCommand);
     _hotkeySub?.cancel();
+    _islandSub?.cancel();
     _cancelSub?.cancel();
     super.dispose();
   }
@@ -144,6 +152,12 @@ class _HomeShellState extends State<HomeShell> {
           firstRun: false,
         ),
         refreshStatus: () => widget.app.refreshStatus(force: true),
+        askScreen: () {
+          if (_screenQaRunning || !mounted) return;
+          _screenQaRunning = true;
+          runScreenQaFlow(context, widget.app)
+              .whenComplete(() => _screenQaRunning = false);
+        },
       ),
     );
   }
@@ -170,7 +184,29 @@ class _HomeShellState extends State<HomeShell> {
                 primaryIndex == -1 ? _lastPrimary : primaryIndex;
             return Scaffold(
               appBar: AppBar(
-                title: const Text('DJ'),
+                title: wide
+                    ? Row(
+                        children: [
+                          const Text('DJ'),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: _HeaderDynamicIsland(
+                                app: app,
+                                onTapIsland: () {
+                                  if (_screenQaRunning) return;
+                                  _screenQaRunning = true;
+                                  runScreenQaFlow(context, app).whenComplete(
+                                      () => _screenQaRunning = false);
+                                },
+                                onTapPalette: _openPalette,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : const Text('DJ'),
                 actions: [
                   ValueListenableBuilder(
                     valueListenable: app.status,
@@ -672,6 +708,126 @@ class _DynamicIslandPill extends StatelessWidget {
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+/// Persistent compact Dynamic Island capsule centered in the wide AppBar so the
+/// user always sees where to click for Hey DJ voice/screen help & shortcuts.
+class _HeaderDynamicIsland extends StatelessWidget {
+  const _HeaderDynamicIsland({
+    required this.app,
+    required this.onTapIsland,
+    required this.onTapPalette,
+  });
+
+  final DjAppState app;
+  final VoidCallback onTapIsland;
+  final VoidCallback onTapPalette;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AppConfig>(
+      valueListenable: app.config,
+      builder: (context, _, __) {
+        return ValueListenableBuilder<({String state, String text})>(
+          valueListenable: app.companionState,
+          builder: (context, companion, _) {
+            final active = companion.state != 'idle';
+            final dotColor = switch (companion.state) {
+              'listening' => const Color(0xFF22C55E),
+              'thinking' => const Color(0xFFA78BFA),
+              _ => const Color(0xFF0071E3),
+            };
+            final label = active && companion.text.isNotEmpty
+                ? companion.text
+                : 'Hey DJ  •  ${app.currentHotkeyLabel}';
+            return Material(
+              color: const Color(0xFF111116),
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 360),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: active ? dotColor : const Color(0xFF2C2C34),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: InkWell(
+                        borderRadius: const BorderRadius.horizontal(
+                          left: Radius.circular(20),
+                        ),
+                        onTap: onTapIsland,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: dotColor,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 1,
+                      height: 16,
+                      color: const Color(0xFF2C2C34),
+                    ),
+                    InkWell(
+                      borderRadius: const BorderRadius.horizontal(
+                        right: Radius.circular(20),
+                      ),
+                      onTap: onTapPalette,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          'Ctrl+K',
+                          style: TextStyle(
+                            color: Color(0xFFA1A1AA),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );

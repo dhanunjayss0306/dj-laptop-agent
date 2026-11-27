@@ -10,6 +10,7 @@ import '../core/models.dart';
 import '../platform/update_note.dart';
 import 'app_state.dart';
 import 'folders_dialog.dart';
+import 'screen_qa_flow.dart';
 import 'sign_in_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -179,6 +180,69 @@ class _SettingsPageState extends State<SettingsPage> {
                           onPressed: () =>
                               widget.app.refreshStatus(force: true),
                           child: const Text('Refresh status'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _card(
+                    title: 'Shortcuts & Hotkeys',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Press your Hey DJ shortcut from any app (or click '
+                          'the Dynamic Island at the top of your screen) to '
+                          'ask about your screen or run a command.',
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Hey DJ Voice + Screen shortcut',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final preset in DjAppState.hotkeyPresets)
+                              ChoiceChip(
+                                label: Text(preset.label),
+                                selected: (config.hotkeyPreset ?? 'ctrl_alt_d') ==
+                                    preset.id,
+                                onSelected: (_) async {
+                                  final ok = await widget.app
+                                      .applyHotkeyPreset(preset.id);
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        ok
+                                            ? 'Shortcut set to ${preset.label}.'
+                                            : '${preset.label} is already in use by another app.',
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('• Finish speaking early: Ctrl + Shift + Space'),
+                        const Text('• Command Palette: Ctrl + K'),
+                        const Text('• Privacy Screen Pause / Resume: Ctrl + Alt + P'),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () =>
+                                  runScreenQaFlow(context, widget.app),
+                              icon: const Icon(Icons.auto_awesome, size: 18),
+                              label: const Text('Test Hey DJ now'),
+                            ),
+                          ],
                         ),
                       ],
                     ),

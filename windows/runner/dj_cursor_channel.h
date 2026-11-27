@@ -50,6 +50,9 @@ class DjCursorChannel {
   // Window procedure for the overlay window. Forwards to the instance.
   static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT message,
                                          WPARAM wparam, LPARAM lparam);
+  // Window procedure for the clickable top-center Dynamic Island pill.
+  static LRESULT CALLBACK IslandWndProc(HWND hwnd, UINT message,
+                                        WPARAM wparam, LPARAM lparam);
 
  private:
   // One annotation shape. Coordinates are virtual-screen pixels.
@@ -74,13 +77,16 @@ class DjCursorChannel {
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   void EnsureWindow();
+  void EnsureIslandWindow();
+  void UpdateIslandWindow();
   // Repositions/resizes the overlay to cover the whole virtual screen
   // for annotations. Creates it if needed.
   void EnsureAnnotationWindow();
   // Repositions/resizes the overlay back to the small cursor-sized window
-  // at (x_, y_). No-op when there is no overlay window.
+  // at (x_ - kCursorMargin, y_ - kCursorMargin).
   void RestoreCursorWindow();
   void DrawOverlay();
+  void DrawIsland();
   // Draws the annotation shapes into the DIB device context. (origin_x,
   // origin_y) is the virtual-screen position of the DIB's (0, 0) pixel,
   // so every annotation coordinate is offset by it.
@@ -99,6 +105,9 @@ class DjCursorChannel {
 
   flutter::MethodChannel<flutter::EncodableValue> channel_;
   HWND overlay_ = nullptr;
+  HWND island_ = nullptr;
+  int island_w_ = 248;
+  int island_h_ = 36;
   bool visible_ = false;
   int x_ = 0;
   int y_ = 0;

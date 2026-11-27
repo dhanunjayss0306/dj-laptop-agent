@@ -1,6 +1,7 @@
 // Command Center (default page): StatusCards on top, chat list,
 // composer at the bottom. Renders every ChatResponse kind.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -115,9 +116,48 @@ class _CommandPageState extends State<CommandPage> {
   Future<void> _toggleVoice() async {
     if (_busy) return;
     if (_listening) {
-      await widget.app.voiceChannel.stopListening();
+      final stopRes = await widget.app.voiceChannel.stopListening();
       if (!mounted) return;
       setState(() => _listening = false);
+      final wavB64 = stopRes['wavBase64'] as String? ?? '';
+      if (Platform.isWindows && wavB64.isNotEmpty) {
+        await widget.app.updateCompanion('thinking', 'Transcribing...');
+        var spoken = '';
+        final client = widget.app.buildWorkerClient();
+        if (client != null) {
+          try {
+            spoken = (await client.transcribeWav(base64Decode(wavB64))).trim();
+          } catch (_) {} finally {
+            client.close();
+          }
+        }
+        if (spoken.isEmpty) {
+          final whisper = await widget.app.voiceChannel.whisperStatus();
+          if (whisper['running'] != true && whisper['serverFound'] == true) {
+            final modelPath = whisper['defaultModelPath'] as String? ?? '';
+            if (modelPath.isNotEmpty) {
+              await widget.app.voiceChannel.startWhisper(modelPath);
+            }
+          }
+          final local = await widget.app.voiceChannel.transcribeWavBytes(wavB64);
+          if (local['ok'] == true) {
+            spoken = (local['text'] as String? ?? '').trim();
+          }
+        }
+        await widget.app.updateCompanion('idle');
+        if (!mounted) return;
+        if (spoken.isNotEmpty) {
+          _composer.text = spoken;
+          await _send();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not hear speech — check mic or Cloud/OpenWhisper.'),
+            ),
+          );
+        }
+        return;
+      }
       await widget.app.updateCompanion('idle');
       return;
     }
@@ -259,21 +299,27 @@ class _CommandPageState extends State<CommandPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (Platform.isAndroid) ...[
-                IconButton(
-                  tooltip: _listening ? 'Stop listening' : 'Speak command',
-                  icon: Icon(_listening ? Icons.mic_off : Icons.mic),
-                  color: _listening ? Theme.of(context).colorScheme.error : null,
-                  onPressed: _busy ? null : _toggleVoice,
-                ),
-                const SizedBox(width: 4),
-              ],
               IconButton(
-                tooltip: 'Hey DJ (Voice + Screen)',
-                icon: const Icon(Icons.auto_awesome, size: 20),
-                onPressed:
-                    _busy ? null : () => runScreenQaFlow(context, widget.app),
+                tooltip: _listening ? 'Stop & send voice' : 'Speak command',
+                icon: Icon(_listening ? Icons.mic_off : Icons.mic),
+                color: _listening ? Theme.of(context).colorScheme.error : null,
+                onPressed: _busy ? null : _toggleVoice,
               ),
+              const SizedBox(width: 4),
+              if (MediaQuery.sizeOf(context).width >= 600)
+                OutlinedButton.icon(
+                  onPressed:
+                      _busy ? null : () => runScreenQaFlow(context, widget.app),
+                  icon: const Icon(Icons.auto_awesome, size: 18),
+                  label: const Text('Hey DJ'),
+                )
+              else
+                IconButton(
+                  tooltip: 'Hey DJ (Voice + Screen)',
+                  icon: const Icon(Icons.auto_awesome, size: 20),
+                  onPressed:
+                      _busy ? null : () => runScreenQaFlow(context, widget.app),
+                ),
               const SizedBox(width: 4),
               ElevatedButton(
                 onPressed: (_busy || _composer.text.trim().isEmpty)

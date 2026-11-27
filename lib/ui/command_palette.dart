@@ -11,6 +11,7 @@ class PaletteActions {
     required this.rebuildIndex,
     required this.openFolders,
     required this.refreshStatus,
+    this.askScreen,
   });
 
   /// Page index 0-10: Command Center, Files, Duplicates, Organize,
@@ -19,6 +20,7 @@ class PaletteActions {
   final VoidCallback rebuildIndex;
   final VoidCallback openFolders;
   final VoidCallback refreshStatus;
+  final VoidCallback? askScreen;
 }
 
 class _PaletteCommand {
@@ -174,6 +176,21 @@ class _CommandPaletteDialogState extends State<_CommandPaletteDialog> {
       keywords: 'refresh status reload',
       icon: Icons.refresh,
       run: widget.actions.refreshStatus,
+    ),
+    if (widget.actions.askScreen != null)
+      _PaletteCommand(
+        title: 'Ask DJ (Voice + Screen)',
+        group: 'Actions',
+        keywords: 'hey dj voice screen hotkey ask dynamic island',
+        icon: Icons.auto_awesome,
+        run: widget.actions.askScreen!,
+      ),
+    _PaletteCommand(
+      title: 'Shortcuts & Hotkeys',
+      group: 'Actions',
+      keywords: 'shortcut hotkey keybinding settings customize',
+      icon: Icons.keyboard,
+      run: () => widget.actions.goToPage(10),
     ),
   ];
 

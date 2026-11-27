@@ -92,7 +92,36 @@ class DjApp extends StatelessWidget {
     return MaterialApp(
       title: 'DJ - your files, found',
       theme: djTheme(),
-      home: HomeShell(app: app),
+      home: AnimatedBuilder(
+        animation: app.privacyScreen,
+        builder: (context, child) {
+          return Stack(
+            children: [
+              child!,
+              if (app.privacyScreen.isBlackedOut)
+                Positioned.fill(
+                  child: AbsorbPointer(
+                    child: Material(
+                      color: Colors.black,
+                      child: Center(
+                        child: Text(
+                          '${app.privacyScreen.statusMessage}\nPress Ctrl+Alt+P to reveal',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFF28282E),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+        child: HomeShell(app: app),
+      ),
     );
   }
 }

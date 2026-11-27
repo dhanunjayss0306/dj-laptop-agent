@@ -611,15 +611,81 @@ class DjAppState {
 
   // -- Hotkey (Windows) + floating button (Android) --------------------
 
-  /// Register the Windows global hotkey (Ctrl+Alt+D) and show the
-  /// Android floating DJ button. Each is a no-op on other platforms
-  /// and returns false instead of throwing when the native side is
-  /// not there. Call once at startup; the HomeShell listens for
-  /// presses on [hotkeyChannel].
+  static const List<
+      ({String id, String label, bool ctrl, bool alt, bool shift, int vk})>
+      hotkeyPresets = [
+    (
+      id: 'ctrl_alt_d',
+      label: 'Ctrl + Alt + D',
+      ctrl: true,
+      alt: true,
+      shift: false,
+      vk: 0x44,
+    ),
+    (
+      id: 'alt_space',
+      label: 'Alt + Space',
+      ctrl: false,
+      alt: true,
+      shift: false,
+      vk: 0x20,
+    ),
+    (
+      id: 'ctrl_shift_d',
+      label: 'Ctrl + Shift + D',
+      ctrl: true,
+      alt: false,
+      shift: true,
+      vk: 0x44,
+    ),
+    (
+      id: 'f9',
+      label: 'F9',
+      ctrl: false,
+      alt: false,
+      shift: false,
+      vk: 0x78,
+    ),
+  ];
+
+  static ({String id, String label, bool ctrl, bool alt, bool shift, int vk})
+      hotkeyForPreset(String? id) {
+    for (final p in hotkeyPresets) {
+      if (p.id == id) return p;
+    }
+    return hotkeyPresets.first;
+  }
+
+  String get currentHotkeyLabel =>
+      hotkeyForPreset(config.value.hotkeyPreset).label;
+
+  /// Saves [presetId] and registers the Windows global hotkey immediately.
+  Future<bool> applyHotkeyPreset(String presetId) async {
+    final preset = hotkeyForPreset(presetId);
+    final next = config.value.copyWith(hotkeyPreset: preset.id);
+    await saveConfig(next);
+    if (!Platform.isWindows) return true;
+    return hotkeyChannel.registerHotkey(
+      ctrl: preset.ctrl,
+      alt: preset.alt,
+      shift: preset.shift,
+      vk: preset.vk,
+    );
+  }
+
+  /// Register the Windows global hotkey, start the Clicky cursor + top
+  /// Dynamic Island on Windows, or show the Android floating DJ button.
   Future<void> registerHotkeyAndFloatingButton() async {
     try {
       if (Platform.isWindows) {
-        await hotkeyChannel.registerHotkey();
+        final preset = hotkeyForPreset(config.value.hotkeyPreset);
+        await hotkeyChannel.registerHotkey(
+          ctrl: preset.ctrl,
+          alt: preset.alt,
+          shift: preset.shift,
+          vk: preset.vk,
+        );
+        await setCompanionFollow(true);
       } else if (Platform.isAndroid) {
         await floatingButtonChannel.showFloatingButton();
       }

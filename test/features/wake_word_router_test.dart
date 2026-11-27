@@ -1,9 +1,12 @@
 import 'dart:io';
 
+import 'package:dj/core/config.dart';
 import 'package:dj/core/hashing.dart';
+import 'package:dj/core/models.dart';
 import 'package:dj/core/security.dart';
 import 'package:dj/features/wake_word.dart';
 import 'package:dj/services/duplicate_service.dart';
+import 'package:dj/ui/app_state.dart';
 import 'package:dj/ui/screen_qa_flow.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -127,6 +130,27 @@ void main() {
         final groups = await DuplicateService().find([tmp.path]);
         expect(groups.length, 1);
         expect(groups.first.files.length, 2);
+      } finally {
+        tmp.deleteSync(recursive: true);
+      }
+    });
+  });
+
+  group('hotkey presets and config persistence', () {
+    test('AppConfig preserves speakScreenAnswers and hotkeyPreset', () {
+      final tmp = Directory.systemTemp.createTempSync('dj_cfg_test_');
+      try {
+        final repo = ConfigRepository(dataDir: tmp.path);
+        final saved = AppConfig(
+          folders: const [],
+          speakScreenAnswers: true,
+          hotkeyPreset: 'alt_space',
+        );
+        repo.save(saved);
+        final loaded = repo.load();
+        expect(loaded.speakScreenAnswers, isTrue);
+        expect(loaded.hotkeyPreset, 'alt_space');
+        expect(DjAppState.hotkeyForPreset('alt_space').label, 'Alt + Space');
       } finally {
         tmp.deleteSync(recursive: true);
       }

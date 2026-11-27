@@ -114,6 +114,7 @@ class ConfigRepository {
                 saved['privacyDetectShoulderSurfers'] as bool?,
             privacyStartOnLaunch: saved['privacyStartOnLaunch'] as bool?,
             speakScreenAnswers: saved['speakScreenAnswers'] as bool?,
+            hotkeyPreset: saved['hotkeyPreset'] as String?,
           );
         }
       } catch (_) {

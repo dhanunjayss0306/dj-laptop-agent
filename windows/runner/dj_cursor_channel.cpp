@@ -17,13 +17,18 @@ namespace dj {
 namespace {
 
 constexpr const wchar_t kOverlayClassName[] = L"DJ_FAKE_CURSOR_OVERLAY";
+constexpr const wchar_t kIslandClassName[] = L"DJ_DYNAMIC_ISLAND";
 // DJ blue #0071E3.
 constexpr COLORREF kDjBlue = RGB(0x00, 0x71, 0xE3);
+constexpr COLORREF kListenGreen = RGB(0x22, 0xC5, 0x5E);
+constexpr COLORREF kThinkPurple = RGB(0xA7, 0x8B, 0xFA);
 constexpr COLORREF kWhite = RGB(0xFF, 0xFF, 0xFF);
-// Cursor-only overlay window size; large enough for the cursor marker plus
-// multi-line live caption ("fake lyrics") bubbles.
-constexpr int kOverlayWidth = 440;
-constexpr int kOverlayHeight = 220;
+constexpr COLORREF kIslandBg = RGB(0x11, 0x11, 0x16);
+constexpr int kCursorMargin = 16;
+// Cursor-only overlay window size; large enough for the padded cursor marker
+// plus multi-line live caption ("fake lyrics") bubbles.
+constexpr int kOverlayWidth = 480;
+constexpr int kOverlayHeight = 240;
 // Translucent highlight fill: alpha ~70/255 over DJ blue.
 constexpr uint32_t kHighlightFill = (70u << 24) | 0x000071E3u;
 constexpr COLORREF kCaptionBg = RGB(0x16, 0x16, 0x1A);
@@ -38,6 +43,21 @@ void RegisterOverlayClass() {
   wc.hInstance = ::GetModuleHandle(nullptr);
   wc.lpszClassName = kOverlayClassName;
   wc.hCursor = ::LoadCursor(nullptr, IDC_ARROW);
+  wc.hbrBackground = nullptr;
+  ::RegisterClassW(&wc);
+  registered = true;
+}
+
+void RegisterIslandClass() {
+  static bool registered = false;
+  if (registered) {
+    return;
+  }
+  WNDCLASSW wc{};
+  wc.lpfnWndProc = DjCursorChannel::IslandWndProc;
+  wc.hInstance = ::GetModuleHandle(nullptr);
+  wc.lpszClassName = kIslandClassName;
+  wc.hCursor = ::LoadCursor(nullptr, IDC_HAND);
   wc.hbrBackground = nullptr;
   ::RegisterClassW(&wc);
   registered = true;
@@ -162,6 +182,34 @@ DjCursorChannel::~DjCursorChannel() {
     ::DestroyWindow(overlay_);
     overlay_ = nullptr;
   }
+  if (island_ != nullptr) {
+    ::DestroyWindow(island_);
+    island_ = nullptr;
+  }
+}
+
+LRESULT CALLBACK DjCursorChannel::IslandWndProc(HWND hwnd, UINT message,
+                                                WPARAM wparam,
+                                                LPARAM lparam) {
+  if (message == WM_MOUSEACTIVATE) {
+    return MA_NOACTIVATE;
+  }
+  if (message == WM_SETCURSOR) {
+    ::SetCursor(::LoadCursor(nullptr, IDC_HAND));
+    return TRUE;
+  }
+  if (message == WM_LBUTTONUP) {
+    auto* self = reinterpret_cast<DjCursorChannel*>(
+        ::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (self != nullptr) {
+      self->channel_.InvokeMethod(
+          "onIslandClicked",
+          std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(
+              flutter::EncodableMap{})));
+    }
+    return 0;
+  }
+  return ::DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
 LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
@@ -181,7 +229,8 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
             const int ty = pt.y + 18;
             self->x_ += (tx - self->x_) / 3;
             self->y_ += (ty - self->y_) / 3;
-            ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_, self->y_, 0, 0,
+            ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_ - kCursorMargin,
+                           self->y_ - kCursorMargin, 0, 0,
                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
           }
         }
@@ -189,6 +238,7 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
             (self->companion_state_ == CompanionState::kListening ||
              self->companion_state_ == CompanionState::kThinking)) {
           self->DrawOverlay();
+          self->DrawIsland();
         } else {
           self->StopPulseTimer();
         }
@@ -210,7 +260,8 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
             if (std::abs(dx) > 1 || std::abs(dy) > 1) {
               self->x_ += (dx + (dx > 0 ? 2 : -2)) / 3;
               self->y_ += (dy + (dy > 0 ? 2 : -2)) / 3;
-              ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_, self->y_, 0, 0,
+              ::SetWindowPos(hwnd, HWND_TOPMOST, self->x_ - kCursorMargin,
+                             self->y_ - kCursorMargin, 0, 0,
                              SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
           }
@@ -236,7 +287,8 @@ LRESULT CALLBACK DjCursorChannel::OverlayWndProc(HWND hwnd, UINT message,
         const int cur_y = static_cast<int>(
             omt * omt * self->from_y_ + 2.0 * omt * t * self->ctrl_y_ +
             t * t * self->y_);
-        ::SetWindowPos(hwnd, HWND_TOPMOST, cur_x, cur_y, 0, 0,
+        ::SetWindowPos(hwnd, HWND_TOPMOST, cur_x - kCursorMargin,
+                       cur_y - kCursorMargin, 0, 0,
                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         if (linear >= 1.0) {
           self->StopAnimation();
@@ -258,14 +310,49 @@ void DjCursorChannel::EnsureWindow() {
   RegisterOverlayClass();
   overlay_ = ::CreateWindowExW(
       WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-      kOverlayClassName, L"", WS_POPUP, x_, y_, kOverlayWidth, kOverlayHeight,
-      nullptr, nullptr, ::GetModuleHandle(nullptr), nullptr);
+      kOverlayClassName, L"", WS_POPUP, x_ - kCursorMargin, y_ - kCursorMargin,
+      kOverlayWidth, kOverlayHeight, nullptr, nullptr,
+      ::GetModuleHandle(nullptr), nullptr);
   if (overlay_ != nullptr) {
     ::SetWindowLongPtrW(overlay_, GWLP_USERDATA,
                         reinterpret_cast<LONG_PTR>(this));
     overlay_w_ = kOverlayWidth;
     overlay_h_ = kOverlayHeight;
   }
+}
+
+void DjCursorChannel::EnsureIslandWindow() {
+  if (island_ != nullptr) {
+    return;
+  }
+  RegisterIslandClass();
+  const int screen_w = std::max(800, ::GetSystemMetrics(SM_CXSCREEN));
+  const int left = (screen_w - island_w_) / 2;
+  island_ = ::CreateWindowExW(
+      WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      kIslandClassName, L"", WS_POPUP, left, 8, island_w_, island_h_,
+      nullptr, nullptr, ::GetModuleHandle(nullptr), nullptr);
+  if (island_ != nullptr) {
+    ::SetWindowLongPtrW(island_, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(this));
+  }
+}
+
+void DjCursorChannel::UpdateIslandWindow() {
+  EnsureIslandWindow();
+  if (island_ == nullptr) {
+    return;
+  }
+  const bool active = companion_state_ == CompanionState::kListening ||
+                      companion_state_ == CompanionState::kThinking ||
+                      companion_state_ == CompanionState::kResponding;
+  island_w_ = active ? 400 : 252;
+  island_h_ = (active && caption_text_.size() > 38) ? 54 : 36;
+  const int screen_w = std::max(800, ::GetSystemMetrics(SM_CXSCREEN));
+  const int left = (screen_w - island_w_) / 2;
+  ::SetWindowPos(island_, HWND_TOPMOST, left, 8, island_w_, island_h_,
+                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+  DrawIsland();
 }
 
 void DjCursorChannel::EnsureAnnotationWindow() {
@@ -301,8 +388,8 @@ void DjCursorChannel::RestoreCursorWindow() {
   }
   overlay_w_ = kOverlayWidth;
   overlay_h_ = kOverlayHeight;
-  ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, kOverlayWidth,
-                 kOverlayHeight,
+  ::SetWindowPos(overlay_, HWND_TOPMOST, x_ - kCursorMargin, y_ - kCursorMargin,
+                 kOverlayWidth, kOverlayHeight,
                  SWP_NOACTIVATE | SWP_NOOWNERZORDER |
                      (visible_ ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 }
@@ -397,14 +484,14 @@ void DjCursorChannel::DrawOverlay() {
     return;
   }
   // Window origin in virtual-screen pixels: the virtual-screen origin
-  // while annotations are shown (full-screen window), the cursor position
-  // otherwise (small window whose top-left is the cursor tip).
+  // while annotations are shown (full-screen window), or offset by
+  // kCursorMargin when cursor-only so the cursor outline/waveform never clip.
   const int origin_x = HasAnnotations()
                            ? ::GetSystemMetrics(SM_XVIRTUALSCREEN)
-                           : x_;
+                           : (x_ - kCursorMargin);
   const int origin_y = HasAnnotations()
                            ? ::GetSystemMetrics(SM_YVIRTUALSCREEN)
-                           : y_;
+                           : (y_ - kCursorMargin);
   // 32-bit top-down DIB for per-pixel alpha via UpdateLayeredWindow.
   BITMAPINFO info{};
   info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -439,7 +526,6 @@ void DjCursorChannel::DrawOverlay() {
   // GDI painted are opaque, untouched pixels stay transparent.
   // (Simple and robust: track painted pixels by comparing against 0.)
   const HBRUSH blue_brush = ::CreateSolidBrush(kDjBlue);
-  const HBRUSH white_brush = ::CreateSolidBrush(kWhite);
   const HPEN blue_pen = ::CreatePen(PS_SOLID, 1, kDjBlue);
   const HGDIOBJ old_brush = ::SelectObject(mem_dc, blue_brush);
   const HGDIOBJ old_pen = ::SelectObject(mem_dc, blue_pen);
@@ -462,7 +548,7 @@ void DjCursorChannel::DrawOverlay() {
         const int bar_h = std::max(
             4, static_cast<int>((5.0 + (std::sin(phase) + 1.0) * 9.0) * gain));
         const int bx = tip_x + i * 5;
-        const int by = tip_y + 12 - bar_h / 2;
+        const int by = tip_y + 10 - bar_h / 2;
         ::RoundRect(mem_dc, bx, by, bx + 3, by + bar_h, 2, 2);
       }
     } else if (companion_state_ == CompanionState::kThinking) {
@@ -484,17 +570,16 @@ void DjCursorChannel::DrawOverlay() {
       ::SelectObject(mem_dc, prev_pen);
       ::DeleteObject(ring_pen);
     } else {
-      // Triangle pointer, tip at (x_, y_).
+      // Full Clicky-style glowing tilted blue pointer triangle with crisp
+      // white edge so it stays vivid on dark & light windows and never clips.
+      const HPEN white_outline = ::CreatePen(PS_SOLID, 2, kWhite);
+      const HGDIOBJ prev_pen = ::SelectObject(mem_dc, white_outline);
       POINT triangle[3] = {{tip_x, tip_y},
-                           {tip_x, tip_y + 24},
-                           {tip_x + 8, tip_y + 17}};
+                           {tip_x + 4, tip_y + 20},
+                           {tip_x + 19, tip_y + 10}};
       ::Polygon(mem_dc, triangle, 3);
-      ::SelectObject(mem_dc, white_brush);
-      POINT notch[3] = {{tip_x + 3, tip_y + 4},
-                        {tip_x + 3, tip_y + 16},
-                        {tip_x + 7, tip_y + 13}};
-      ::Polygon(mem_dc, notch, 3);
-      ::SelectObject(mem_dc, blue_brush);
+      ::SelectObject(mem_dc, prev_pen);
+      ::DeleteObject(white_outline);
     }
 
     if (!caption_text_.empty()) {
@@ -507,7 +592,6 @@ void DjCursorChannel::DrawOverlay() {
   ::SelectObject(mem_dc, old_brush);
   ::SelectObject(mem_dc, old_pen);
   ::DeleteObject(blue_brush);
-  ::DeleteObject(white_brush);
   ::DeleteObject(blue_pen);
 
   // Fix up alpha: any pixel GDI painted (non-zero RGB) becomes opaque.
@@ -529,6 +613,110 @@ void DjCursorChannel::DrawOverlay() {
   blend.SourceConstantAlpha = 255;
   blend.AlphaFormat = AC_SRC_ALPHA;
   ::UpdateLayeredWindow(overlay_, screen_dc, nullptr, &size, mem_dc,
+                        &src_point, 0, &blend, ULW_ALPHA);
+  ::SelectObject(mem_dc, old_bitmap);
+  ::DeleteObject(dib);
+  ::DeleteDC(mem_dc);
+  ::ReleaseDC(nullptr, screen_dc);
+}
+
+void DjCursorChannel::DrawIsland() {
+  if (island_ == nullptr || island_w_ <= 0 || island_h_ <= 0) {
+    return;
+  }
+  BITMAPINFO info{};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = island_w_;
+  info.bmiHeader.biHeight = -island_h_;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  const HDC screen_dc = ::GetDC(nullptr);
+  const HDC mem_dc = ::CreateCompatibleDC(screen_dc);
+  const HBITMAP dib = ::CreateDIBSection(screen_dc, &info, DIB_RGB_COLORS,
+                                         &bits, nullptr, 0);
+  if (mem_dc == nullptr || dib == nullptr || bits == nullptr) {
+    if (mem_dc != nullptr) ::DeleteDC(mem_dc);
+    if (dib != nullptr) ::DeleteObject(dib);
+    ::ReleaseDC(nullptr, screen_dc);
+    return;
+  }
+  const HGDIOBJ old_bitmap = ::SelectObject(mem_dc, dib);
+  const size_t pixel_count =
+      static_cast<size_t>(island_w_) * static_cast<size_t>(island_h_);
+  std::fill_n(static_cast<uint32_t*>(bits), pixel_count, 0u);
+
+  COLORREF dot_color = kDjBlue;
+  if (companion_state_ == CompanionState::kListening) {
+    dot_color = kListenGreen;
+  } else if (companion_state_ == CompanionState::kThinking) {
+    dot_color = kThinkPurple;
+  }
+
+  const HBRUSH bg_brush = ::CreateSolidBrush(kIslandBg);
+  const HPEN border_pen = ::CreatePen(PS_SOLID, 1, dot_color);
+  const HGDIOBJ old_brush = ::SelectObject(mem_dc, bg_brush);
+  const HGDIOBJ old_pen = ::SelectObject(mem_dc, border_pen);
+  ::RoundRect(mem_dc, 0, 0, island_w_, island_h_, island_h_, island_h_);
+
+  const HBRUSH dot_brush = ::CreateSolidBrush(dot_color);
+  const HGDIOBJ prev_pen = ::SelectObject(mem_dc, ::GetStockObject(NULL_PEN));
+  ::SelectObject(mem_dc, dot_brush);
+  const int dot_cy = island_h_ / 2;
+  ::Ellipse(mem_dc, 14, dot_cy - 5, 24, dot_cy + 5);
+
+  ::SetBkMode(mem_dc, TRANSPARENT);
+  HFONT font = ::CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+  const HGDIOBJ old_font = ::SelectObject(mem_dc, font);
+  ::SetTextColor(mem_dc, kWhite);
+
+  std::wstring display_text = caption_text_;
+  if (display_text.empty()) {
+    switch (companion_state_) {
+      case CompanionState::kListening:
+        display_text = L"Listening... (click to finish)";
+        break;
+      case CompanionState::kThinking:
+        display_text = L"Thinking...";
+        break;
+      default:
+        display_text = L"Hey DJ   \x2022   Ctrl+Alt+D";
+        break;
+    }
+  }
+  RECT tr{32, 6, island_w_ - 14, island_h_ - 6};
+  ::DrawTextW(mem_dc, display_text.c_str(),
+              static_cast<int>(display_text.size()), &tr,
+              DT_LEFT | DT_VCENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+
+  ::SelectObject(mem_dc, old_font);
+  ::DeleteObject(font);
+  ::SelectObject(mem_dc, prev_pen);
+  ::SelectObject(mem_dc, old_brush);
+  ::SelectObject(mem_dc, old_pen);
+  ::DeleteObject(dot_brush);
+  ::DeleteObject(bg_brush);
+  ::DeleteObject(border_pen);
+
+  uint32_t* pixels = static_cast<uint32_t*>(bits);
+  for (size_t i = 0; i < pixel_count; ++i) {
+    if ((pixels[i] & 0x00FFFFFFu) != 0) {
+      pixels[i] |= 0xFF000000u;
+    }
+  }
+
+  POINT src_point{0, 0};
+  SIZE size{island_w_, island_h_};
+  BLENDFUNCTION blend{};
+  blend.BlendOp = AC_SRC_OVER;
+  blend.BlendFlags = 0;
+  blend.SourceConstantAlpha = 255;
+  blend.AlphaFormat = AC_SRC_ALPHA;
+  ::UpdateLayeredWindow(island_, screen_dc, nullptr, &size, mem_dc,
                         &src_point, 0, &blend, ULW_ALPHA);
   ::SelectObject(mem_dc, old_bitmap);
   ::DeleteObject(dib);
@@ -633,7 +821,8 @@ void DjCursorChannel::HandleMethodCall(
       StopAnimation();
       x_ = static_cast<int>(x);
       y_ = static_cast<int>(y);
-      ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, 0, 0,
+      ::SetWindowPos(overlay_, HWND_TOPMOST, x_ - kCursorMargin,
+                     y_ - kCursorMargin, 0, 0,
                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
                          SWP_SHOWWINDOW);
       visible_ = true;
@@ -659,6 +848,7 @@ void DjCursorChannel::HandleMethodCall(
       RestoreCursorWindow();
       ::ShowWindow(overlay_, SW_HIDE);
     }
+    UpdateIslandWindow();
     result->Success(Ok());
     return;
   }
@@ -682,6 +872,7 @@ void DjCursorChannel::HandleMethodCall(
       } else if (overlay_ != nullptr) {
         DrawOverlay();
       }
+      UpdateIslandWindow();
       result->Success(Ok());
       return;
     }
@@ -709,7 +900,8 @@ void DjCursorChannel::HandleMethodCall(
     }
     if (!HasAnnotations()) {
       RestoreCursorWindow();
-      ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, 0, 0,
+      ::SetWindowPos(overlay_, HWND_TOPMOST, x_ - kCursorMargin,
+                     y_ - kCursorMargin, 0, 0,
                      SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
                          SWP_SHOWWINDOW);
     }
@@ -721,6 +913,7 @@ void DjCursorChannel::HandleMethodCall(
       StopPulseTimer();
     }
     DrawOverlay();
+    UpdateIslandWindow();
     result->Success(Ok());
     return;
   }
@@ -764,12 +957,14 @@ void DjCursorChannel::HandleMethodCall(
       if (overlay_ != nullptr) {
         if (!HasAnnotations()) {
           RestoreCursorWindow();
-          ::SetWindowPos(overlay_, HWND_TOPMOST, x_, y_, 0, 0,
+          ::SetWindowPos(overlay_, HWND_TOPMOST, x_ - kCursorMargin,
+                         y_ - kCursorMargin, 0, 0,
                          SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
                              SWP_SHOWWINDOW);
         }
         visible_ = true;
         DrawOverlay();
+        UpdateIslandWindow();
         StartFollowTimer();
       }
     } else {

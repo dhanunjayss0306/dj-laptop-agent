@@ -104,7 +104,9 @@ class PrivacyScreenPage extends StatelessWidget {
                     : controller.isBlackedOut
                         ? 'The screen is black. Look at the screen to reveal it.'
                         : 'You are looking at the screen.')
-                : 'Protection is off. The screen never blacks out while it is off.',
+                : 'Protection is off. When turned on, DJ covers all displays '
+                    'in solid black whenever you look away or someone is '
+                    'behind you (press Ctrl+Alt+P to reveal anytime).',
           ),
           if (overrideOn) ...[
             const SizedBox(height: 12),
